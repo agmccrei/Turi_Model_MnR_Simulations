@@ -1,0 +1,128 @@
+
+load_file("nrngui.hoc")      // load the GUI and standard run libraries
+v_init=-60
+{load_file("../cells/axoaxonic_cell.hoc")}
+{load_file("../cells/basket_cell.hoc")}
+{load_file("../cells/bistratified_cell.hoc")}
+{load_file("../cells/olm_cell.hoc")}
+{load_file("../cells/vipcck_cell.hoc")}
+{load_file("../cells/vipcr_cell.hoc")}
+//xopen("kblock.hoc")          //execute open.load_file just reads
+xopen("current_balance.hoc")
+
+
+strdef n_cell, temp_mkdir, temp_dir
+objectvar 	Cells1, Cells2
+
+if (n1==0) {
+	n_cell="AxoAxonic"
+	Cells1 = new AACell()
+	Cells2 = new AACell()
+	w = 2.0e-4
+	index1 = 14
+	index2 = 16		
+} else if (n1==1) {
+	n_cell="Basket"
+	Cells1 = new BasketCell()
+	Cells2 = new BasketCell()
+	w = 8.0e-5
+	index1 = 14
+	index2 = 16		
+} else if (n1==2) {
+	n_cell="Bistratified"
+	Cells1 = new BistratifiedCell()
+	Cells2 = new BistratifiedCell()
+	w = 8.0e-4
+	index1 = 14
+	index2 = 16	
+} else if (n1==3) {
+	n_cell="OLM"
+	Cells1 = new OLMCell()
+	Cells2 = new OLMCell()
+	index1 = 9
+	index2 = 10
+	w = 0.1e-4
+} else if (n1==4) {
+	n_cell="VIP_CCK"
+	Cells1 = new VIPCCKCell()
+	Cells2 = new VIPCCKCell()
+	w = 6.0e-4
+	index1 = 12
+	index2 = 14	
+} else if (n1==5){
+	n_cell="VIP_CR"
+	Cells1 = new VIPCRCell()
+	Cells2 = new VIPCRCell()
+	w = 2.0e-4
+	index1 = 8
+	index2 = 10	
+}
+
+strdef temp_mkdir, temp_dir
+// Create the directory
+sprint(temp_dir, "SynapticProperties")
+sprint(temp_mkdir, "mkdir -p %s", temp_dir)
+system(temp_mkdir)
+
+
+
+objectvar 	syn1, syn2, stim, clamp1, clamp2
+objref 		sn1, sn2, i1, i2
+objref      FILE1, FILE2
+strdef 		tmp1, tmp2
+
+current_balance(v_init)
+
+//voltage clamp
+Cells1.soma clamp1 = new VClamp(0.5)
+clamp1.dur[0] = 2000		//duration of clamp in ms
+clamp1.amp[0] = -60	//voltage clamp amplitude
+//voltage clamp
+Cells2.soma clamp2 = new VClamp(0.5)
+clamp2.dur[0] = 2000		//duration of clamp in ms
+clamp2.amp[0] = -60	//voltage clamp amplitude
+
+
+// Stimulus - 1 pre-synaptic spike
+stim = new NetStim(0.5)
+stim.interval 	= 500
+stim.number		= 1
+stim.start		= 1000
+
+// Time parameters///////////////////////////////
+tstop        = 2000 // stop time in ms
+steps_per_ms = 10   //
+dt           = 0.1  // time step in ms
+n            = tstop*steps_per_ms
+
+print n_cell
+//making the synapse GABAA
+syn1   = Cells1.pre_list.object(index1)
+sn1	= new NetCon (stim,syn1, -20, 1, w)  //..threshold,delay,weight)
+
+//making second synapse GABAB
+syn2   = Cells2.pre_list.object(index2)
+sn2	= new NetCon (stim,syn2, -20, 1, w)  //..threshold,delay,weight)
+
+
+//making the vectors	
+i1 = new Vector(n)
+i2 = new Vector(n)
+//recording
+i1.record(&clamp1.i)
+i2.record(&clamp2.i)
+
+run()
+
+FILE1 = new File()
+sprint(tmp1, "%s/SEP_GABAAto%s_i_rec_soma.txt", temp_dir, n_cell)
+FILE1.wopen(tmp1)
+for i=0, i1.size()-1 {FILE1.printf("%f\n",i1.x[i])}
+FILE1.close()
+
+
+FILE2 = new File()
+sprint(tmp2, "%s/SEP_GABABto%s_i_rec_soma.txt", temp_dir, n_cell)
+FILE2.wopen(tmp2)
+for i=0, i2.size()-1 {FILE2.printf("%f\n",i2.x[i])}
+FILE2.close()

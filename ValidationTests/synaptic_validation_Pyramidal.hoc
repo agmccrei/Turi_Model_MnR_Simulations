@@ -1,0 +1,385 @@
+
+{load_file("nrngui.hoc")}  // load the GUI and standard run libraries
+
+{load_file("../cells/pyramidal_cell.hoc")} //load axoaxonic cell
+
+v_init=-64.9
+xopen("current_balance.hoc")
+
+objectvar 	Cell1, Cell2, Cell3, Cell4, Cell5, Cell6, Cell7, Cell8, Cell9, Cell10, Cell11, Cell12, Cell13
+objectvar 	syn1, syn2, syn3, syn4, syn5, syn6, syn7, syn8, syn9, syn10, syn11, syn12, syn13
+objectvar   nclist, stim, sn1, sn2, sn3, sn4, sn5, sn6, sn7, sn8, sn9, sn10, sn11, sn12, sn13
+objectvar   clamp1, clamp2, clamp3, clamp4, clamp5, clamp6, clamp7, clamp8, clamp9, clamp10, clamp11, clamp12, clamp13
+objref 		sn1, i1_ca1, i2_ca1, i3_ca1, i4_ca1, i5_ca1, i6_ca1, i7_ca1, i8_ca1, i9_ca1, i10_ca1, i11_ca1, i12_ca1, i13_ca1
+objref      FILE1, FILE2, FILE3, FILE4, FILE5, FILE6, FILE7, FILE8, FILE9, FILE10, FILE11, FILE12, FILE13
+strdef 		tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8, tmp9, tmp10, tmp11, tmp12, tmp13
+
+
+Cell1 = new PyramidalCell()  // template for synapse EC AMPA to PC
+Cell2 = new PyramidalCell()  // template for synapse CA3 AMPA APICAL to PC
+Cell3 = new PyramidalCell()  // template for synapse CA3 AMPA BASAL to PC
+Cell4 = new PyramidalCell()  // template for synapse BC to PC
+Cell5 = new PyramidalCell()  // template for synapse VIPCCK to PC
+Cell6 = new PyramidalCell()  // template for synapse AAC to PC
+Cell7 = new PyramidalCell()  // template for synapse OLM GABAA to PC
+Cell8 = new PyramidalCell()  // template for synapse OLM GABAB to PC
+Cell9 = new PyramidalCell()  // template for synapse BSC GABAA to PC
+Cell10 = new PyramidalCell()  // template for synapse BSC GABAB to PC
+Cell11 = new PyramidalCell()  // template for synapse BSC GABAA to BASAL PC
+Cell12 = new PyramidalCell()  // template for synapse BSC GABAB to BASAL PC
+Cell13 = new PyramidalCell()  // template for synapsePC to PC
+
+
+current_balance(v_init)
+
+
+stim = new NetStim (0.5)
+stim.interval 	= 1
+stim.number		= 1
+stim.start		= 900
+
+
+// Time parameters///////////////////////////////
+tstop = 2000 //stop time in ms
+steps_per_ms = 10
+dt    = 0.1
+n     = tstop*steps_per_ms
+
+
+
+//Vclamp for AMPA & GABAA
+print "Vclamp"
+factor1 = 2.0
+
+//making EC AMPA synapse to PC at lm_medium1 dendrite
+//weigth_ECampatoPC 
+w1 = 0.80*2.0e-4
+
+Cell1.lm_medium1  syn1 = new MyExp2Syn(0.5) 
+syn1.tau1 = 0.5
+syn1.tau2 = 3.0
+syn1.e 	  = 0
+//making the netcon
+sn1	= new NetCon(stim, syn1, -20, 1, w1)
+
+
+
+//making CA3 AMPA synapse to PC at rad_medium1 (apical) dendrite
+//weigth_CA3ampatoapicalPC 
+w2 = 0.80*2.0e-4
+
+Cell2.lm_medium1 syn2 = new MyExp2Syn(0.5)
+syn2.tau1 = 0.5
+syn2.tau2 = 3.0
+syn2.e    = 0
+//making the netcon 
+sn2	= new NetCon (stim,syn2,-20, 1, w2)  //..threshold,delay,weight)
+
+
+
+//making CA3 AMPA synapse to PC at oriProx1 (basal) dendrite
+//weigth_CA3ampatobasalPC 
+w3 = 0.80*2.0e-4
+
+Cell3.oriprox1  syn3 = new MyExp2Syn(0.5) 
+syn3.tau1 = 0.5
+syn3.tau2 = 3.0
+syn3.e 	  = 0
+//making the netcon
+sn3	= new NetCon(stim, syn3, -20, 1, w3)
+
+
+
+//making BC synapse to PC at soma
+//weigth_BCtoPC 
+w4 = 2.0e-4*factor1
+
+Cell4.soma  syn4 = new MyExp2Syn(0.5) 
+syn4.tau1 = 0.30
+syn4.tau2 = 6.20
+syn4.e 	  = -75
+//making the netcon
+sn4	= new NetCon(stim, syn4, -20, 1, w4)
+
+
+
+//making VIPCCK synapse to PC at soma
+//weigth_VIPCCKtoPC 
+w5 = 1.0e-4*factor1
+
+Cell5.soma   syn5 = new MyExp2Syn(0.5) 
+syn5.tau1 = 0.7
+syn5.tau2 = 7.1
+syn5.e 	  = -75
+//making the netcon
+sn5	= new NetCon(stim, syn5, -20, 1, w5)
+
+
+
+//making AAC synapse to PC at axon
+//weigth_AACtoPC 
+w6 = 1.15e-3*factor1
+
+Cell6.axon  syn6 = new MyExp2Syn(0.5) 
+syn6.tau1 = 0.28
+syn6.tau2 = 8.40
+syn6.e 	  = -75
+//making the netcon
+sn6	= new NetCon(stim, syn6, -20, 1, w6)
+
+
+
+//making OLM GABAA synapse to PC at lm_thick1 
+//weigth_OLMgabaatoPC 
+w7 = 3.0e-4*factor1
+
+Cell7.lm_thick1  syn7 = new MyExp2Syn(0.5) 
+syn7.tau1 = 0.13
+syn7.tau2 = 11.0
+syn7.e 	  = -75
+//making the netcon
+sn7	= new NetCon(stim, syn7, -20, 1, w7)
+
+
+//making OLM GABAB synapse to PC at lm_thick1
+//weigth_OLMgababtoPC 
+w8 = 3.0e-4
+
+Cell8.lm_thick1  syn8 = new MyExp2Syn(0.5) 
+syn8.tau1 = 35
+syn8.tau2 = 100	
+syn8.e 	  = -75
+//making the netcon
+sn8	= new NetCon(stim, syn8, -20, 1, w8)
+
+
+
+//making BSC GABAA synapse to PC at soma 
+//weigth_BSCgabaatoPC 
+w9 = 5.1e-4*factor1
+
+Cell9.rad_thick1  syn9 = new MyExp2Syn(0.5) 
+syn9.tau1 = 0.11
+syn9.tau2 = 9.70
+syn9.e 	  = -75
+//making the netcon
+sn9	= new NetCon(stim, syn9, -20, 1, w9)
+
+
+
+//making BSC GABAB synapse to PC at soma 
+//weigth_BSCgababtoPC 
+w10 = 5.1e-4
+
+Cell10.rad_thick1  syn10 = new MyExp2Syn(0.5) 
+syn10.tau1 = 35
+syn10.tau2 = 100
+syn10.e    = -75
+//making the netcon
+sn10	= new NetCon(stim, syn10, -20, 1, w10)
+
+
+
+//making BSC GABAA synapse to PC at oridist1a (basal)
+//weigth_BSCgabaatobasalPC 
+w11 = 5.1e-4*factor1
+
+Cell11.rad_thick1  syn11 = new MyExp2Syn(0.5) 
+syn11.tau1 = 0.11
+syn11.tau2 = 9.70
+syn11.e    = -75
+//making the netcon
+sn11	= new NetCon(stim, syn11, -20, 1, w11)
+
+
+//making BSC GABAB synapse to PC at oridist1a (basal)
+//weigth_BSCgababtobasalPC 
+w12 = 5.1e-4
+
+Cell12.oridist1a  syn12 = new MyExp2Syn(0.5) 
+syn12.tau1 = 35
+syn12.tau2 = 100
+syn12.e    = -75
+//making the netcon
+sn12	= new NetCon(stim, syn12, -20, 1, w12)
+
+
+//making PC synapse to PC at radTprox
+//weigth_PCtoPC 
+w13 = 7.0e-3*0.6
+
+Cell13.radTprox  syn13 = new MyExp2Syn(0.5) 
+syn13.tau1 = 0.10
+syn13.tau2 = 1.50
+syn13.e    = 0
+//making the netcon
+sn13	= new NetCon(stim, syn13, -20, 1, w13)
+
+
+
+//Vclamp at soma
+Cell1.soma clamp1 = new VClamp(0.5)  
+Cell2.soma clamp2 = new VClamp(0.5)  
+Cell3.soma clamp3 = new VClamp(0.5)  
+Cell4.soma clamp4 = new VClamp(0.5)  
+Cell5.soma clamp5 = new VClamp(0.5)
+Cell6.soma clamp6 = new VClamp(0.5)
+Cell7.soma clamp7 = new VClamp(0.5)  
+Cell8.soma clamp8 = new VClamp(0.5)
+Cell9.soma clamp9 = new VClamp(0.5)
+Cell10.soma clamp10 = new VClamp(0.5) 
+Cell11.soma clamp11 = new VClamp(0.5)  
+Cell12.soma clamp12 = new VClamp(0.5)  
+Cell13.soma clamp13 = new VClamp(0.5)  
+
+clamp1.dur[0]= 2000			//duration of clamp in ms
+clamp1.amp[0]= -65.2      //voltage clamp amplitude / near to Vrest, for AMPA lower to remove artefacts
+
+clamp2.dur[0]= 2000			
+clamp2.amp[0]= -65.2
+
+clamp3.dur[0]= 2000			
+clamp3.amp[0]= -65.2
+
+clamp4.dur[0]= 2000			
+clamp4.amp[0]= -64.9
+
+clamp5.dur[0]= 2000			
+clamp5.amp[0]= -64.9
+
+clamp6.dur[0]= 2000			
+clamp6.amp[0]= -64.9
+
+clamp7.dur[0]= 2000			
+clamp7.amp[0]= -64.9
+
+clamp8.dur[0]= 2000			
+clamp8.amp[0]= -64.9       
+
+clamp9.dur[0]= 2000			
+clamp9.amp[0]= -64.9
+
+clamp10.dur[0]= 2000			
+clamp10.amp[0]= -64.9
+
+clamp11.dur[0]= 2000			
+clamp11.amp[0]= -64.9       
+
+clamp12.dur[0]= 2000			
+clamp12.amp[0]= -64.9
+
+clamp13.dur[0]= 2000			
+clamp13.amp[0]= -64.9
+
+
+//making the vectors	
+i1_ca1 = new Vector(n)
+i2_ca1 = new Vector(n)
+i3_ca1 = new Vector(n)
+i4_ca1 = new Vector(n)
+i5_ca1 = new Vector(n)
+i6_ca1 = new Vector(n)
+i7_ca1 = new Vector(n)
+i8_ca1 = new Vector(n)
+i9_ca1 = new Vector(n)
+i10_ca1 = new Vector(n)
+i11_ca1 = new Vector(n)
+i12_ca1 = new Vector(n)
+i13_ca1 = new Vector(n)
+
+//recording
+i1_ca1.record(&clamp1.i)
+i2_ca1.record(&clamp2.i)
+i3_ca1.record(&clamp3.i)
+i4_ca1.record(&clamp4.i)
+i5_ca1.record(&clamp5.i)
+i6_ca1.record(&clamp6.i)
+i7_ca1.record(&clamp7.i)
+i8_ca1.record(&clamp8.i)
+i9_ca1.record(&clamp9.i)
+i10_ca1.record(&clamp10.i)
+i11_ca1.record(&clamp11.i)
+i12_ca1.record(&clamp12.i)
+i13_ca1.record(&clamp13.i)
+
+
+run()
+
+FILE1 = new File()
+sprint(tmp1, "SynapticProperties/ampaECtoPC_i_rec_soma.txt")
+FILE1.wopen(tmp1)
+for i=0, i1_ca1.size()-1 {FILE1.printf("%f\n",i1_ca1.x[i])}
+FILE1.close()
+
+FILE2 = new File()
+sprint(tmp2, "SynapticProperties/ampaCA3toapicalPC_i_rec_soma.txt")
+FILE2.wopen(tmp2)
+for i=0, i2_ca1.size()-1 {FILE2.printf("%f\n",i2_ca1.x[i])}
+FILE2.close()	
+
+FILE3 = new File()
+sprint(tmp3, "SynapticProperties/ampaCA3tobasalPC_i_rec_soma.txt")
+FILE3.wopen(tmp3)
+for i=0, i3_ca1.size()-1 {FILE3.printf("%f\n",i3_ca1.x[i])}
+FILE3.close()	
+
+FILE4 = new File()
+sprint(tmp4, "SynapticProperties/BCtoPC_i_rec_soma.txt")
+FILE4.wopen(tmp4)
+for i=0, i4_ca1.size()-1 {FILE4.printf("%f\n",i4_ca1.x[i])}
+FILE4.close()	
+
+FILE5 = new File()
+sprint(tmp5, "SynapticProperties/VIPCCKtoPC_i_rec_soma.txt")
+FILE5.wopen(tmp5)
+for i=0, i5_ca1.size()-1 {FILE5.printf("%f\n",i5_ca1.x[i])}
+FILE5.close()	
+
+FILE6 = new File()
+sprint(tmp6, "SynapticProperties/AACtoPC_i_rec_soma.txt")
+FILE6.wopen(tmp6)
+for i=0, i6_ca1.size()-1 {FILE6.printf("%f\n",i6_ca1.x[i])}
+FILE6.close()	
+
+FILE7 = new File()
+sprint(tmp7, "SynapticProperties/gabaaOLMtoPC_i_rec_soma.txt")
+FILE7.wopen(tmp7)
+for i=0, i7_ca1.size()-1 {FILE7.printf("%f\n",i7_ca1.x[i])}
+FILE7.close()	
+
+FILE8 = new File()
+sprint(tmp8, "SynapticProperties/gababOLMtoPC_i_rec_soma.txt")
+FILE8.wopen(tmp8)
+for i=0, i8_ca1.size()-1 {FILE8.printf("%f\n",i8_ca1.x[i])}
+FILE8.close()
+
+FILE9 = new File()
+sprint(tmp9, "SynapticProperties/gabaaBSCtoPC_i_rec_soma.txt")
+FILE9.wopen(tmp9)
+for i=0, i9_ca1.size()-1 {FILE9.printf("%f\n",i9_ca1.x[i])}
+FILE9.close()
+
+FILE10 = new File()
+sprint(tmp10, "SynapticProperties/gababBSCtoPC_i_rec_soma.txt")
+FILE10.wopen(tmp10)
+for i=0, i10_ca1.size()-1 {FILE10.printf("%f\n",i10_ca1.x[i])}
+FILE10.close()
+
+FILE11 = new File()
+sprint(tmp11, "SynapticProperties/gabaaBSCtobasalPC_i_rec_soma.txt")
+FILE11.wopen(tmp11)
+for i=0, i11_ca1.size()-1 {FILE11.printf("%f\n",i11_ca1.x[i])}
+FILE11.close()
+
+FILE12 = new File()
+sprint(tmp12, "SynapticProperties/gababBSCtobasalPC_i_rec_soma.txt")
+FILE12.wopen(tmp12)
+for i=0, i12_ca1.size()-1 {FILE12.printf("%f\n",i12_ca1.x[i])}
+FILE12.close()
+
+FILE13 = new File()
+sprint(tmp13, "SynapticProperties/PCtoPC_i_rec_soma.txt")
+FILE13.wopen(tmp13)
+for i=0, i13_ca1.size()-1 {FILE13.printf("%f\n",i13_ca1.x[i])}
+FILE13.close()
+

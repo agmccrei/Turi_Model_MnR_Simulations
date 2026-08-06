@@ -1,0 +1,48 @@
+//Current Injection @ soma to calculate Rin, sag ratio
+
+{load_file("nrngui.hoc")}  // load the GUI and standard run libraries
+{load_file("../cells/pyramidal_cell.hoc")}
+
+// Create the directory
+strdef name_cell,temp_mkdir, temp_dir
+name_cell="Pyramidal"
+sprint(temp_dir, "%s/PassiveProperties",name_cell)
+sprint(temp_mkdir, "mkdir -p %s", temp_dir)
+system(temp_mkdir)
+
+// Create 1 Cells - one per type
+objectvar Cells
+Cells = new PyramidalCell()
+
+// Create an electrode @ the soma
+objectvar stim
+Cells.soma stim = new IClamp(0.5)
+stim.del = 500			// delay in ms
+stim.dur = 1000			// duration in ms
+stim.amp = icurrent	    // amplitude in nA
+
+// Time parameters
+tstop = 2000 //stop time in ms
+steps_per_ms = 10
+dt=0.1
+n=tstop*steps_per_ms
+
+// Create vectors to write current/voltages
+objref v_soma
+v_soma = new Vector(n)
+
+// Write voltage to vector
+Cells.soma{ v_soma.record(&v(0.5)) }
+
+// Run simulation
+run()
+
+// Save volts to file
+objref FILE1
+strdef tmp1
+
+FILE1 = new File()
+sprint(tmp1, "%s/PassiveProperties/somaV_%.3f.txt",name_cell, stim.amp)
+FILE1.wopen(tmp1)
+v_soma.printf(FILE1,"%f\n")
+FILE1.close()

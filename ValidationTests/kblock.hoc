@@ -1,0 +1,25 @@
+
+//tamiol_26/1/2018
+
+proc k_block() {
+	forall {
+		//closing sodium
+		if (ismembrane("kv")) 		{gbar_kv 		= gbar_kv *0}
+		if (ismembrane("km")) 		{gbar_km		= gbar_km *0}
+		if (ismembrane("kap"))		{gbar_kap		= gbar_kap*0}
+		if (ismembrane("kad"))		{gkabar_kad		= gkabar_kad*0}
+		if (ismembrane("kca"))		{gbar_kca 		= gbar_kca* 0}
+		if (ismembrane("mykca"))	{gkbar_mykca	= gkbar_mykca* 0}
+		if (ismembrane("hha2"))		{gkbar_hha2 	= gkbar_hha2*0}
+		if (ismembrane("hha_old"))	{gkbar_hha_old 	= gkbar_hha_old*0}
+		//closing calcium
+		/*if (ismembrane("car")) 		{gcabar_car		= gcabar_car *0}
+		if (ismembrane("calh")) 	{gcalbar_calH	= gcalbar_calH *0}
+		if (ismembrane("cat"))		{gcatbar_cat	= gcatbar_cat*0}
+		if (ismembrane("somacar"))	{gcabar_somacar = gcabar_somacar*0}
+		if (ismembrane("hha2"))		{gkbar_hha2 	= gkbar_hha2*0}
+		if (ismembrane("hha_old"))	{gkbar_hha_old 	= gkbar_hha_old*0}*/
+}
+
+}
+

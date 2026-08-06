@@ -1,0 +1,241 @@
+
+{load_file("nrngui.hoc")}  // load the GUI and standard run libraries
+
+{load_file("../cells/vipcck_cell.hoc")} //load axoaxonic cell
+
+{xopen("kblock.hoc")} //execute open.load_file just reads
+
+strdef temp_mkdir, temp_dir
+// Create the directory
+sprint(temp_dir, "SynapticProperties/")
+sprint(temp_mkdir, "mkdir -p %s", temp_dir)
+system(temp_mkdir)
+
+objectvar 	Cell1, Cell2, Cell3, Cell4, Cell5, Cell6, Cell7
+objectvar 	syn1, syn2, syn3, syn4, syn5, syn6, syn7
+objectvar   nclist, stim, sn1, sn2, sn3, sn4, sn5, sn6, sn7
+objectvar   clamp1, clamp2, clamp3, clamp4, clamp5, clamp6, clamp7
+objref 		sn1, i1_ca1, i2_ca1, i3_ca1, i4_ca1, i5_ca1, i6_ca1, i7_ca1
+objref      FILE1, FILE2, FILE3, FILE4, FILE5, FILE6, FILE7
+strdef 		tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7
+
+
+Cell1 = new VIPCCKCell()  // template for synapse EC to VIPCCK
+Cell2 = new VIPCCKCell()  // template for synapse CA3 to VIPCCK
+Cell3 = new VIPCCKCell()  // template for synapse PC to VIPCCK
+Cell4 = new VIPCCKCell()  // template for synapse BC to VIPCCK
+Cell5 = new VIPCCKCell()  // template for synapse BSC to VIPCCK
+Cell6 = new VIPCCKCell()  // template for synapse OLM to AAC
+Cell7 = new VIPCCKCell()  // template for synapse VIPCCK to VIPCCK
+
+
+
+stim = new NetStim (0.5)
+stim.interval 	= 1
+stim.number		= 1
+stim.start		= 900
+
+
+// Time parameters///////////////////////////////
+tstop = 2000 //stop time in ms
+steps_per_ms = 10
+dt    = 0.1
+n     = tstop*steps_per_ms
+
+
+
+//Vclamp for AMPA & GABAA
+print "Vclamp"
+factor2 = 1.0
+
+//making EC synapse to VIPCCK at lmM1 dendrite
+//weigth_ECtoVIPCCK 
+w1 = 1.2e-4
+
+Cell1.lmM1  syn1 = new MyExp2Syn(0.5) 
+syn1.tau1 = 2.0
+syn1.tau2 = 6.3
+syn1.e 	  = 0
+//making the netcon
+sn1	= new NetCon(stim, syn1, -20, 1, w1)
+
+
+
+//making CA3 synapse to VIPCCK at radMed1 dendrite
+//weigth_CA3toVIPCCK 
+w2 = 1.2e-4
+
+Cell2.radMed1 syn2 = new MyExp2Syn(0.5)
+syn2.tau1 = 2.0
+syn2.tau2 = 6.3
+syn2.e    = 0
+//making the netcon 
+sn2	= new NetCon (stim,syn2,-20, 1, w2)  //..threshold,delay,weight)
+
+
+
+//making PC synapse to VIPCCK at oriProx1 dendrite
+//weigth_PCtoVIPCCK 
+w3 = 5.0e-4
+
+Cell3.oriProx1  syn3 = new MyExp2Syn(0.5) 
+syn3.tau1 = 0.5
+syn3.tau2 = 3
+syn3.e 	  = 0
+//making the netcon
+sn3	= new NetCon(stim, syn3, -20, 1, w3)
+
+
+
+//making BC synapse to VIPCCK at soma
+//weigth_BCtoVIPCCK 
+w4 = 1.2e-4*factor2
+
+Cell4.soma  syn4 = new MyExp2Syn(0.5) 
+syn4.tau1 = 0.29
+syn4.tau2 = 2.67
+syn4.e 	  = -75
+//making the netcon
+sn4	= new NetCon(stim, syn4, -20, 1, w4)
+
+
+
+//making BSC synapse to VIPCCK at radMed1 dendrite
+//weigth_BSCtoVIPCCK 
+w5 = 6.0e-4*factor2
+
+Cell5.radMed1   syn5 = new MyExp2Syn(0.5) 
+syn5.tau1 = 0.29
+syn5.tau2 = 2.67
+syn5.e 	  = -75
+//making the netcon
+sn5	= new NetCon(stim, syn5, -20, 1, w5)
+
+
+
+//making OLM synapse to VIPCCK at lmM1 dendrite
+//weigth_OLMtoVIPCCK 
+w6 = 1.2e-4*factor2
+
+Cell6.lmM1  syn6 = new MyExp2Syn(0.5) 
+syn6.tau1 = 0.73
+syn6.tau2 = 20.20
+syn6.e 	  = -75
+//making the netcon
+sn6	= new NetCon(stim, syn6, -20, 1, w6)
+
+
+
+//making VIPCCK synapse to VIPCCK at soma
+//weigth_VIPCCKtoVIPCCK 
+w7 = 7.0e-4*factor2
+
+Cell7.soma  syn7 = new MyExp2Syn(0.5) 
+syn7.tau1 = 0.43
+syn7.tau2 = 4.49 	
+syn7.e 	  = -75
+//making the netcon
+sn7	= new NetCon(stim, syn7, -20, 1, w7)
+
+
+//Vclamp at soma
+Cell1.soma clamp1 = new VClamp(0.5)  
+Cell2.soma clamp2 = new VClamp(0.5)  
+Cell3.soma clamp3 = new VClamp(0.5)  
+Cell4.soma clamp4 = new VClamp(0.5)  
+Cell5.soma clamp5 = new VClamp(0.5)
+Cell6.soma clamp6 = new VClamp(0.5)
+Cell7.soma clamp7 = new VClamp(0.5)  
+
+
+clamp1.dur[0]= 2000			//duration of clamp in ms
+clamp1.amp[0]= -64.5       //voltage clamp amplitude / near to Vrest
+
+clamp2.dur[0]= 2000			
+clamp2.amp[0]= -64.5
+
+clamp3.dur[0]= 2000			
+clamp3.amp[0]= -64.5
+
+clamp4.dur[0]= 2000			
+clamp4.amp[0]= -64.5
+
+clamp5.dur[0]= 2000			
+clamp5.amp[0]= -64.5
+
+clamp6.dur[0]= 2000			
+clamp6.amp[0]= -64.5
+
+clamp7.dur[0]= 2000			
+clamp7.amp[0]= -64.5
+
+//cutting potasium
+//k_block()
+//making the vectors	
+i1_ca1 = new Vector(n)
+i2_ca1 = new Vector(n)
+i3_ca1 = new Vector(n)
+i4_ca1 = new Vector(n)
+i5_ca1 = new Vector(n)
+i6_ca1 = new Vector(n)
+i7_ca1 = new Vector(n)
+
+//recording
+i1_ca1.record(&clamp1.i)
+i2_ca1.record(&clamp2.i)
+i3_ca1.record(&clamp3.i)
+i4_ca1.record(&clamp4.i)
+i5_ca1.record(&clamp5.i)
+i6_ca1.record(&clamp6.i)
+i7_ca1.record(&clamp7.i)
+
+
+run()
+
+FILE1 = new File()
+sprint(tmp1, "SynapticProperties/ECtoVIPCCK_i_rec_soma.txt")
+FILE1.wopen(tmp1)
+for i=0, i1_ca1.size()-1 {FILE1.printf("%f\n",i1_ca1.x[i])}
+FILE1.close()
+
+FILE2 = new File()
+sprint(tmp2, "SynapticProperties/CA3toVIPCCK_i_rec_soma.txt")
+FILE2.wopen(tmp2)
+for i=0, i2_ca1.size()-1 {FILE2.printf("%f\n",i2_ca1.x[i])}
+FILE2.close()	
+
+FILE3 = new File()
+sprint(tmp3, "SynapticProperties/PCtoVIPCCK_i_rec_soma.txt")
+FILE3.wopen(tmp3)
+for i=0, i3_ca1.size()-1 {FILE3.printf("%f\n",i3_ca1.x[i])}
+FILE3.close()	
+
+FILE4 = new File()
+sprint(tmp4, "SynapticProperties/BCtoVIPCCK_i_rec_soma.txt")
+FILE4.wopen(tmp4)
+for i=0, i4_ca1.size()-1 {FILE4.printf("%f\n",i4_ca1.x[i])}
+FILE4.close()	
+
+FILE5 = new File()
+sprint(tmp5, "SynapticProperties/BSCtoVIPCCK_i_rec_soma.txt")
+FILE5.wopen(tmp5)
+for i=0, i5_ca1.size()-1 {FILE5.printf("%f\n",i5_ca1.x[i])}
+FILE5.close()	
+
+FILE6 = new File()
+sprint(tmp6, "SynapticProperties/OLMtoVIPCCK_i_rec_soma.txt")
+FILE6.wopen(tmp6)
+for i=0, i6_ca1.size()-1 {FILE6.printf("%f\n",i6_ca1.x[i])}
+FILE6.close()	
+
+FILE7 = new File()
+sprint(tmp7, "SynapticProperties/VIPCCKtoVIPCCK_i_rec_soma.txt")
+FILE7.wopen(tmp7)
+for i=0, i7_ca1.size()-1 {FILE7.printf("%f\n",i7_ca1.x[i])}
+FILE7.close()	
+
+
+
+
+
+

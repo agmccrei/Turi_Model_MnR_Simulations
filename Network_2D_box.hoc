@@ -1,0 +1,1587 @@
+// CA1 Network with grid-like inputs
+
+
+// Based on Cutsuridis et al, 2009
+// Hippocampus, 2009, DOI 10.1002/hipo.20661.
+
+{load_file("nrngui.hoc")}
+// nrn_load_dll("/Users/agmccrei/Library/CloudStorage/GoogleDrive-agmccrei@gmail.com/My Drive/TopolnikLab/TuriModel/246546-master/x86_64/.libs/libnrnmech.so")
+
+print "Mechanisms loaded. Starting cell loads..."
+
+seed1 = n_trials
+seed2 = n_runs*n_trials
+
+// CELL TYPES
+{load_file("cells/pyramidal_cell.hoc")}
+{load_file("cells/basket_cell.hoc")}
+{load_file("cells/axoaxonic_cell.hoc")}
+{load_file("cells/bistratified_cell.hoc")}
+{load_file("cells/olm_cell.hoc")}
+{load_file("cells/vipcck_cell.hoc")}
+{load_file("cells/vipcrpvm_cell.hoc")}
+{load_file("cells/vipcrnvm_cell.hoc")}
+// NOISE
+{load_file("cells/stim_cell_noise.hoc")}
+// GRID-LIKE INPUT
+{load_file("cells/stim_cell_ec.hoc")}
+{load_file("cells/stim_cell_ca3.hoc")}
+// SEPTUM
+{load_file("cells/burst_cell.hoc")}
+// MEDIAN RAPHE
+{load_file("cells/stim_cell_mnr.hoc")}
+// RANDOM GENERATOR
+{load_file("ranstream.hoc")}  // to give each cell its own sequence generator
+
+// Athanasia Papoutsi
+func round () {
+  if ($1-int($1) >= 0.5) {
+    return int($1)+1
+  } else {
+    return int($1)
+  }
+}
+
+// --- check if scalar values were inputted - if not, assign 1
+if (!name_declared("scale_VIP_CR_to_OLM")) { execute("scale_VIP_CR_to_OLM = 1") }
+if (!name_declared("scale_PC_to_OLM")) { execute("scale_PC_to_OLM = 1") }
+
+// --- Sanity check: Print scale values ---
+print "scale_VIP_CR_to_OLM="
+print scale_VIP_CR_to_OLM
+print "scale_PC_to_OLM="
+print scale_PC_to_OLM
+
+strdef my_string,temp_save1,temp_save2,temp_dir, temp_mkdir
+strdef pot_file,pot_dir
+objref pot_fobj
+
+if (n_neuron==0) {
+  my_string = "Control"
+} else if (n_neuron==1) {
+  my_string ="No_VIPcells"
+} else if (n_neuron==2) {
+  my_string ="No_VIPCR"
+} else if (n_neuron==3) {
+  my_string ="No_VIPCRtoBC"
+} else if (n_neuron==4) {
+  my_string ="No_VIPCRtoOLM"
+} else if (n_neuron==5) {
+  my_string ="No_VIPCCK"
+} else if (n_neuron==6) {
+  my_string ="No_VIPPVM"
+} else if (n_neuron==7) {
+  my_string ="No_VIPNVM"
+} else if (n_neuron==8) {
+  sprint(my_string, "ModulateOLM_VIPCR2OLM_%.2f_PC2OLM_%.2f", scale_VIP_CR_to_OLM, scale_PC_to_OLM)
+} else if (n_neuron==9) {
+  my_string ="Silenced_MnR"
+} else if (n_neuron==10) {
+  my_string ="Silenced_MnR_to_VCpvm"
+} else if (n_neuron==11) {
+  my_string ="Silenced_MnR_to_CCK_VCnvm"
+}
+
+strdef learning
+learning = "2D_box"
+
+// Condition control: 0: Novelty, 1: CFC, 2: Reintroduction, 3: Neutral
+if (!name_declared("learning_cond")) { execute("learning_cond = 0") }
+if (!name_declared("File")) { load_file("stdrun.hoc") }
+if (learning_cond == 0) { learning = "2D_box_Novelty" }
+if (learning_cond == 1) { learning = "2D_box_CFC" }
+if (learning_cond == 2) { learning = "2D_box_Reintroduction" }
+if (learning_cond == 3) { learning = "2D_box_Neutral" }
+if (learning_cond == 4) { learning = "2D_box_Familiar2Novelty" }
+
+sprint(temp_dir, "Simulation_Results/%s/%s/Trial_%d/Run_%d",learning,my_string,n_trials,n_runs)
+sprint(temp_mkdir, "mkdir -p %s", temp_dir)
+system(temp_mkdir)
+
+TINIT    = 400
+STARTDEL = 500  // msecs
+THETA    = 125 // msecs (8 Hz)
+GAMMA    = 25  // msecs (40 Hz)
+
+duration = 176 // total time of "active" simulation (22000ms / 125ms)
+SIMDUR = TINIT + (THETA*duration) + STARTDEL/10 // simulation duration (msecs)
+
+//////////////////////////////////
+// Step 1: Define the cell classes
+//////////////////////////////////
+nplf  = 49 // 7x7 grid of fields
+ndend = 8
+probability = 0.40 // probability of place cell formation
+
+scale     = 1
+npcell    = 130*scale
+naacell   = 2*scale   
+nbcell    = 8*scale   
+nbscell   = 2*scale 
+nolm      = 2*scale
+nvipcck   = 1*scale
+nvipcrpvm    = 4*scale
+nvipcrnvm = 1*scale
+nCA3      = nplf*ndend
+nEC       = nplf*ndend
+nCA3nvm   = nplf*ndend
+nECnvm    = nplf*ndend
+nSEP      = 10
+nNOISE    = 1000
+nMnR      = nplf*ndend
+
+ncell = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm + nvipcrnvm// total number of cells
+nstim = nCA3+nEC+nCA3nvm+nECnvm+nSEP+nNOISE+nMnR                // total number of inputs
+ntot  = ncell+nstim
+
+
+// Define folder of inputs
+strdef tmpdir_pvm, tmpdir_nvm
+sprint(tmpdir_pvm, "make_inputs_linear_track/runs_produced_2D_cond%d_pos", learning_cond)
+sprint(tmpdir_nvm, "make_inputs_linear_track/runs_produced_2D_cond%d_neg", learning_cond)
+
+//////////////////////////////////
+// Entorhinal Cortex Input
+//////////////////////////////////
+objref index_vecEC
+
+index_vecEC = new Vector(nEC)
+
+//Monotonically increasing index vector initialization:
+for k = 0, nEC-1 {
+  index_vecEC.x[k] = k
+}
+
+objref flEC, vspkEC[nEC], vecstimEC[nEC]
+flEC = new File()
+strdef tmpstring1
+
+for (i=0; i < nEC; i = i+1) { 
+  sprint(tmpstring1, "%s/run_%d/g%d_EC.txt", tmpdir_pvm, n_runs, index_vecEC.x[i])
+  if (flEC.ropen(tmpstring1)) {
+    vspkEC[i] = new Vector()
+    vspkEC[i].scanf(flEC)
+    flEC.close()
+  } else {
+    print "Error: Could not open ", tmpstring1
+    vspkEC[i] = new Vector()
+  }
+}
+
+objref index_vecECnvm
+
+index_vecECnvm = new Vector(nECnvm)
+
+
+//Monotonically increasing index vector initialization:
+
+for k = 0, nECnvm-1 {
+  index_vecECnvm.x[k] = k
+}
+
+
+objref flECnvm, vspkECnvm[nECnvm], vecstimECnvm[nECnvm]
+flECnvm = new File()
+strdef tmpstring2
+
+for (i=0; i < nECnvm; i = i+1) { 
+  sprint(tmpstring2, "%s/run_%d/g%d_EC.txt", tmpdir_nvm, n_runs, index_vecECnvm.x[i])
+  if (flECnvm.ropen(tmpstring2)) {
+    vspkECnvm[i] = new Vector()
+    vspkECnvm[i].scanf(flECnvm)
+    flECnvm.close()
+  } else {
+    print "Error: Could not open ", tmpstring2
+    vspkECnvm[i] = new Vector()
+  }
+}
+
+
+//////////////////////////////////
+// CA3 Input
+//////////////////////////////////
+objref index_vecCA3
+
+index_vecCA3 = new Vector(nCA3)
+
+//Monotonically increasing index vector initialization:
+for k = 0, nCA3-1 {
+  index_vecCA3.x[k] = k
+}
+
+objref flCA3, vspkCA3[nCA3], vecstimCA3[nCA3]
+flCA3 = new File()
+strdef tmpstring3
+
+for (i=0; i < nCA3; i = i+1) { 
+  sprint(tmpstring3, "%s/run_%d/g%d_CA3.txt", tmpdir_pvm, n_runs, index_vecCA3.x[i])
+  if (flCA3.ropen(tmpstring3)) {
+    vspkCA3[i] = new Vector()
+    vspkCA3[i].scanf(flCA3)
+    flCA3.close()
+  } else {
+     print "Error: Could not open ", tmpstring3
+     vspkCA3[i] = new Vector()
+  }
+}
+
+
+objref index_vecCA3nvm
+
+index_vecCA3nvm = new Vector(nCA3nvm)
+
+//Monotonically increasing index vector initialization:
+for k = 0, nCA3nvm-1 {
+  index_vecCA3nvm.x[k] = k
+}
+
+objref flCA3nvm, vspkCA3nvm[nCA3nvm], vecstimCA3nvm[nCA3nvm]
+flCA3nvm = new File()
+strdef tmpstring4
+
+for (i=0; i < nCA3nvm; i = i+1) { 
+  sprint(tmpstring4, "%s/run_%d/g%d_CA3.txt", tmpdir_nvm, n_runs, index_vecCA3nvm.x[i])
+  if (flCA3nvm.ropen(tmpstring4)) {
+    vspkCA3nvm[i] = new Vector()
+    vspkCA3nvm[i].scanf(flCA3nvm)
+    flCA3nvm.close()
+  } else {
+    print "Error: Could not open ", tmpstring4
+    vspkCA3nvm[i] = new Vector()
+  }
+}
+
+//////////////////////////////////
+// Background Input
+//////////////////////////////////
+// Construction of Background input
+objref index_vecNOISE
+
+index_vecNOISE = new Vector(nNOISE)
+
+//Monotonically increasing index vector initialization:
+for k = 0, nNOISE-1 {
+  index_vecNOISE.x[k] = k
+}
+
+objref flNOISE, vspkNOISE[nNOISE], vecstimNOISE[nNOISE]
+flNOISE = new File()
+strdef tmpstring5
+
+for (i=0; i < nNOISE; i = i+1) { 
+  sprint(tmpstring5, "background_noise/rate5/run_%d/noise_%d.txt", 0, index_vecNOISE.x[i])
+  if (flNOISE.ropen(tmpstring5)) {
+    vspkNOISE[i] = new Vector()
+    vspkNOISE[i].scanf(flNOISE)
+    flNOISE.close()
+  } else {
+    print "Error: Could not open ", tmpstring5
+    vspkNOISE[i] = new Vector()
+  }
+}
+
+//////////////////////////////////
+// MnR Input
+//////////////////////////////////
+objref index_vecMnR
+
+index_vecMnR = new Vector(nMnR)
+
+//Monotonically increasing index vector initialization:
+for k = 0, nMnR-1 {
+  index_vecMnR.x[k] = k
+}
+
+objref flMnR, vspkMnR[nMnR], vecstimMnR[nMnR]
+flMnR = new File()
+strdef tmpstringMnR
+
+for (i=0; i < nMnR; i = i+1) { 
+  sprint(tmpstringMnR, "%s/run_%d/g%d_MnR.txt", tmpdir_pvm, n_runs, index_vecMnR.x[i])
+  if (flMnR.ropen(tmpstringMnR)) {
+    vspkMnR[i] = new Vector()
+    vspkMnR[i].scanf(flMnR)
+    flMnR.close()
+  } else {
+    // Expected in conditions where there is no novelty (spikes will just be empty)
+    vspkMnR[i] = new Vector()
+  }
+}
+
+
+
+
+// gid ordering: 
+// PCs:0..npcell-1
+// BCs:npcell..npcell+nbcell-1
+// etc
+// indices of first cell of each type in list "cells"
+iPC     = 0
+iAAC    = npcell
+iBC     = npcell+naacell
+iBSC    = npcell+naacell+nbcell
+iOLM    = npcell+naacell+nbcell+nbscell
+iVCCK   = npcell+naacell+nbcell+nbscell+nolm
+iVCRpvm = npcell+naacell+nbcell+nbscell+nolm+nvipcck
+iVCRnvm = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm
+iCA3    = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm
+iEC     = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3
+iCA3nvm = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3+nEC
+iECnvm  = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3+nEC+nCA3nvm
+iSEP    = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3+nEC+nCA3nvm+nECnvm
+iNOISE  = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3+nEC+nCA3nvm+nECnvm+nSEP
+iMnR    = npcell+naacell+nbcell+nbscell+nolm+nvipcck+nvipcrpvm+nvipcrnvm+nCA3+nEC+nCA3nvm+nECnvm+nSEP+nNOISE
+
+//////////////////////////////////////////////////////////////
+// Steps 2 and 3 are to create the cells and connect the cells
+//////////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////
+// CONNECTIVITY PARAMETERS
+//////////////////////////////////////////////////////////////
+
+// Simple connectivity
+f1 = 36
+
+EC_PC    = 8                   // # of connections received by each PC from EC cells (excit)
+EC_AAC   = round(970/f1)       // # of connections received by each AAC from EC cells (excit)
+EC_BC    = round(150/f1)       // # of connections received by each BC from EC cells (excit)
+EC_BSC   = round(864/f1)       // # of connections received by each BSC from EC cells (excit)
+EC_VCCK  = round(300/f1)       // # of connections received by each BSC from EC cells (excit)
+EC_VCRpvm   = round(1118/f1)      // # of connections received by each VIP/CR from EC cells (excit)
+EC_VCRnvm   = round(1118/f1)      // # of connections received by each VIP/CR from EC cells (excit)
+
+MnR_VCCK  = round(108/f1)      // # of connections received by each VIP/CCK from MnR cells (excit) - ~ 3 contacts per cell
+MnR_VCRpvm  = round(108/f1)    // # of connections received by each VIP/CR PVM from MnR cells (excit) - ~ 3 contacts per cell
+MnR_VCRnvm  = round(108/f1)    // # of connections received by each VIP/CR NVM from MnR cells (excit) - ~ 3 contacts per cell
+
+CA3_PC   = 8                   // # of connections received by each PC from CA3 cells (excit)
+CA3_AAC  = round(8340/f1)      // # of connections received by each AAC from CA3 cells (excit)
+CA3_BC   = round(12094/f1)     // # of connections received by each BC from CA3 cells (excit)
+CA3_BSC  = round(11564/f1)     // # of connections received by each BSC from CA3 cells (excit)
+CA3_OLM  = round(2000/f1)      // # of connections received by each OLM from CA3 cells (excit)
+CA3_VCCK = round(4000/f1)      // # of connections received by each VIP/CCK from CA3 cells (excit)
+CA3_VCRpvm  = round(5000/f1)      // # of connections received by each VIP/CR from CA3 cells (excit)
+CA3_VCRnvm  = round(5000/f1)      // # of connections received by each VIP/CR from CA3 cells (excit)
+
+SEP_BC   = nSEP                // # of connections received by each basket cell from septum (inhib)
+SEP_AAC  = nSEP                // # of connections received by each AAC cell from septum (inhib)
+SEP_BSC  = nSEP                // # of connections received by each BSC cell from septum (inhib)
+SEP_OLM  = nSEP                // # of connections received by each OLM cell from septum (inhib)
+SEP_VCCK = nSEP                // # of connections received by each VIP/CCK cell from septum (inhib)
+SEP_VCR  = nSEP                // # of connections received by each VIP/CR cell from septum (inhib)
+
+PC_PC    = round(197/f1)       // # of connections received by each PC from other PCs (excit)
+PC_AAC   = round(486/f1)       // # of connections received by each bistratified cell from PCs (excit)
+PC_BC    = round(1272/f1)      // # of connections received by each basket cell from PCs (excit)
+PC_BSC   = round(1098/f1)      // # of connections received by each bistratified cell from PCs (excit)
+PC_OLM   = round(7137/f1)      // # of connections received by each OLM cell from PCs (excit)
+PC_VCCK  = round(4137/f1)      // # of connections received by each VIP/CCK cell from PCs (excit)
+PC_VCRpvm   = round(4137/f1)      // # of connections received by each VIP/CR cell from PCs (excit)
+PC_VCRnvm   = round(4137/f1)      // # of connections received by each VIP/CR cell from PCs (excit)
+
+//------ FROM INs to cells--------------------
+//onto PCs
+AAC_PC  = round(36/f1)
+BC_PC   = round(187/f1)
+BSC_PC  = round(100/f1)
+OLM_PC  = round(80/f1)
+VCCK_PC = round(104/f1)
+
+// onto AACs
+BC_AAC   = round(39/f1)
+BSC_AAC  = round(160/f1)
+OLM_AAC  = round(80/f1) // indexed but not implemented
+
+// onto BCs
+BC_BC      = round(39/f1)
+BSC_BC     = round(160/f1)
+OLM_BC     = round(80/f1) // indexed but not implemented
+VCRpvm_BC  = round(96/f1*0.8)
+VCRnvm_BC  = round(96/f1*0.2)
+VCCK_BC    = round(96/f1)
+
+// onto BSCs
+BC_BSC   = round(39/f1)
+BSC_BSC  = round(160/f1)
+OLM_BSC  = round(80/f1) // indexed but not implemented
+
+// onto OLMs
+BSC_OLM    = round(390/f1)
+OLM_OLM    = round(60/f1) // indexed but not implemented
+VCRpvm_OLM = round(390/f1*0.8)
+VCRnvm_OLM = round(390/f1*0.2)
+
+// onto VIP/CCKs
+BC_VCCK    = round(38/f1)
+BSC_VCCK   = round(160/f1)
+OLM_VCCK   = round(400/f1) // indexed but not implemented
+VCCK_VCCK  = round(280/f1) // indexed but not implemented
+VCRpvm_VCCK = round(390/f1)
+
+// onto VIP/CRs PVM
+// N/A
+
+// onto VIP/CRs NVM
+VCRpvm_VCRnvm = round(390/f1)
+
+//////////////////////////////////////////////////////////////
+// WEiGHTS/DElAYS
+//////////////////////////////////////////////////////////////
+//------ FROM EC AND CA3 SC--------------------
+// FROM EC to PCs
+Ecell2Pcell_weight       = 2.0e-4 // 0.80*2.0e-4
+Ecell2Pcell_delay        = 1.0
+// FROM CA3 to PCs
+CA3cell2Pcell_weight     = 2.5e-4 // 0.80*2.0e-4
+CA3cell2Pcell_delay      = 1.0
+
+// FROM EC to INs
+// EC --> Axoaxonic cell
+Ecell2AAcell_weight        = 2.2e-4 // 1.2e-4
+Ecell2AAcell_delay         = 1.0
+// EC --> Basket cell
+Ecell2Bcell_weight         = 1.2e-5 // 0.1e-4
+Ecell2Bcell_delay          = 1.0
+// EC --> Bistratified cell
+Ecell2BScell_weight        = 5.0e-4 // 1.5e-4
+Ecell2BScell_delay         = 1.0
+// EC --> VIP/CCK cell
+Ecell2VCCKcell_weight      = 1.0e-4 // 3.0e-4
+Ecell2VCCKcell_delay       = 1.0
+// EC --> VIP/CR pvm cell
+Ecell2VCRpvmcell_weight    = 4.0e-4 // 3.0e-4
+Ecell2VCRpvmcell_delay     = 1.0
+// EC --> VIP/CR nvm cell
+Ecell2VCRnvmcell_weight    = 1.0e-4 // 3.0e-4
+Ecell2VCRnvmcell_delay     = 1.0
+
+// FROM MnR to INs
+factor_MnR = 10 // boost influence of MnR inputs if not strong enough
+// MnR --> VIP/CCK cell
+MnR2VCCKcell_weight      = (0.00057 * factor_MnR) / MnR_VCCK
+MnR2VCCKcell_delay       = 1.0
+// MnR --> VIP/CR pvm cell
+MnR2VCRpvmcell_weight      = (0.00014 * factor_MnR) / MnR_VCRpvm
+MnR2VCRpvmcell_delay       = 1.0
+// MnR --> VIP/CR nvm cell
+MnR2VCRnvmcell_weight      = (0.00017 * factor_MnR) / MnR_VCRnvm
+MnR2VCRnvmcell_delay       = 1.0
+
+// FROM CA3 to INs
+// CA3 --> Axoaxonic cell
+CA3cell2AAcell_weight      = 2.2e-4 // 1.2e-4
+CA3cell2AAcell_delay       = 1.0
+// CA3 --> Basket cell
+CA3cell2Bcell_weight       = 1.2e-4 // 2.2e-4
+CA3cell2Bcell_delay        = 1.0
+// CA3 --> Bistratified cell
+CA3cell2BScell_weight      = 5.0e-4 // 1.5e-4
+CA3cell2BScell_delay       = 1.0
+// CA3 --> OLM cell
+CA3cell2OLMcell_weight     = 1.05e-4
+CA3cell2OLMcell_delay      = 1.0
+// CA3 --> VIP/CCK cell
+CA3cell2VCCKcell_weight    = 6.0e-4 // 1.05e-4
+CA3cell2VCCKcell_delay     = 1.0
+// CA3 --> VIP/CR pvm cell
+CA3cell2VCRpvmcell_weight  = 1.0e-4 // 1.05e-4
+CA3cell2VCRpvmcell_delay   = 1.0
+// CA3 --> VIP/CR nvm cell
+CA3cell2VCRnvmcell_weight  = 4.0e-4 // 1.05e-4
+CA3cell2VCRnvmcell_delay   = 1.0
+
+
+//------ TO PCs--------------------
+factor1 = 2.0
+// FROM PCs to PCs
+Pcell2Pcell_weight           = 7.0e-3*0.6
+Pcell2Pcell_delay            = 1.0
+
+// FROM AACs to PCS
+AAcell2Pcell_weight          = 1.15e-3*factor1
+AAcell2Pcell_delay           = 1.0
+
+// FROM BCs to PCS
+Bcell2Pcell_weight           = 4.0e-4*factor1 // 2.0e-4*factor1
+Bcell2Pcell_delay            = 1.0
+
+// FROM BSCs to PCS
+BScell2Pcell_weight          = 1.1e-4*factor1 // 5.1e-4*factor1
+BScell2Pcell_GABAB_weight    = 1.1e-4 // 5.1e-4
+BScell2Pcell_delay           = 1.0
+
+// FROM OLMs to PCS
+OLMcell2Pcell_weight         = 3.0e-3*factor1 // 3.0e-4*factor1
+OLMcell2Pcell_GABAB_weight   = 3.0e-3 // 3.0e-4
+OLMcell2Pcell_delay          = 1.0
+
+
+// FROM VIPCCKs to PCS
+VCCKcell2Pcell_weight        = 0.8e-4*factor1 // 1.0e-4*factor1
+VCCKcell2Pcell_delay         = 1.0
+
+
+//------PCs TO INs--------------------
+// FROM PCs to AACs
+Pcell2AAcell_weight       = 4.0e-5
+Pcell2AAcell_delay        = 1.0
+// FROM PCs to BCs
+Pcell2Bcell_weight        = 4.0e-4 // 7.0e-4
+Pcell2Bcell_delay         = 1.0
+// FROM PCs to BSCs
+Pcell2BScell_weight       = 1.9e-3
+Pcell2BScell_delay        = 1.0 
+// FROM PCs to OLMs
+Pcell2OLMcell_weight      = 4.5e-3 * scale_PC_to_OLM // 2.0e-4
+Pcell2OLMcell_delay       = 1.0
+// FROM PCs to VIP/CCKs
+Pcell2VCCKcell_weight     = 5.0e-7 // 5.0e-4
+Pcell2VCCKcell_delay      = 1.0
+// FROM PCs to VIP/CR pvm
+Pcell2VCRpvmcell_weight   = 5.0e-7 // 5.0e-4
+Pcell2VCRpvmcell_delay    = 1.0
+// FROM PCs to VIP/CR nvm
+Pcell2VCRnvmcell_weight   = 5.0e-7 // 5.0e-4
+Pcell2VCRnvmcell_delay    = 1.0
+
+//------INs TO INs--------------------
+factor2 = 1.0
+// ONTO AACs
+// FROM BCs to AACs
+Bcell2AAcell_weight       = 1.0e-4*factor2 // 1.2e-4*factor2
+Bcell2AAcell_delay        = 1.0
+// FROM BSCs to AACs
+BScell2AAcell_weight      = 6.0e-4*factor2
+BScell2AAcell_delay       = 1.0
+
+// ONTO BCs
+// FROM BCs to BCs
+Bcell2Bcell_weight       = 1.6e-3*factor2
+Bcell2Bcell_delay        = 1.0
+// FROM BSCs to BCs
+BScell2Bcell_weight      = 9.0e-3*factor2
+BScell2Bcell_delay       = 1.0
+// FROM VIP/CR pvm to BCs
+VCRpvmcell2Bcell_weight  = 3.0e-3*factor2 // 9.0e-3*factor2*5.0
+VCRpvmcell2Bcell_delay   = 1.0
+// FROM VIP/CR nvm to BCs
+VCRnvmcell2Bcell_weight  = 3.0e-3*factor2 // 9.0e-3*factor2*5.0
+VCRnvmcell2Bcell_delay   = 1.0
+// FROM VIP/CCK to BCs
+VCCKcell2Bcell_weight    = 3.0e-3*factor2
+VCCKcell2Bcell_delay     = 1.0
+
+
+// ONTO BSCs
+// FROM BCs to BSCs
+Bcell2BScell_weight      = 2.4e-3*factor2 // 2.9e-3*factor2
+Bcell2BScell_delay       = 1.0
+// FROM BSCs to BSCs
+BScell2BScell_weight     = 5.1e-4*factor2
+BScell2BScell_delay      = 1.0
+
+// ONTO OLMs
+// FROM BSCs to OLMs
+BScell2OLMcell_weight    = 1.0e-5*factor2 // 2.0e-5*factor2
+BScell2OLMcell_delay     = 1.0
+// FROM VIP/CR pvm to OLMs
+VCRpvmcell2OLMcell_weight = 1.5e-2*factor2 * scale_VIP_CR_to_OLM // 3.5e-3*factor2
+VCRpvmcell2OLMcell_delay = 1.0
+// FROM VIP/CR nvm to OLMs
+VCRnvmcell2OLMcell_weight = 1.0e-3*factor2 * scale_VIP_CR_to_OLM // 3.5e-3*factor2
+VCRnvmcell2OLMcell_delay = 1.0
+
+// ONTO VIP/CCKs
+// FROM BSCs to VIP/CCKs
+BScell2VCCKcell_weight   = 1.0e-7*factor2 // 8.0e-4*factor2
+BScell2VCCKcell_delay    = 1.0
+// FROM BCs to VIP/CCKs
+Bcell2VCCKcell_weight    = 1.0e-7*factor2 // 1.2e-3*factor2
+Bcell2VCCKcell_delay     = 1.0
+// FROM VIP/CR pvm to VIP/CCKs
+VCRpvmcell2VCCKcell_weight = 5.0e-3*factor2
+VCRpvmcell2VCCKcell_delay = 1.0
+
+// FROM VIP/CR pvm to VIP/CR nvm
+VCRpvmcell2VCRnvm_weight    = 5.0e-3*factor2
+VCRpvmcell2VCRnvmcell_delay = 1.0
+
+//////////////////////////////////////////////////////////////
+// SYNAPTIC INDICES
+//////////////////////////////////////////////////////////////
+
+// Synapse indices
+// onto CA1 PCs
+iEC_PC     = 0   // EC  AMPA excit to SLM (6 of)
+iECN_PC    = 6   // CA3 NMDA excit to SLM (6 of)
+iCA3_PC    = 12  // CA3 AMPA excit to medium SR (6 of)
+iCA3N_PC   = 18  // CA3 NMDA excit to medium SR (6 of)
+iCA3_PCB   = 24  // CA3 AMPA excit to Oriens (6 of)
+iCA3N_PCB  = 30  // CA3 NMDA excit to Oriens (6 of)
+
+iBC_PC     = 36  // ff&fb inhib via BCs to soma
+iVCCK_PC   = 37  // ff&fb inhib via VIP/CCKs to soma
+iAAC_PC    = 38  // ff&fb inhib via AACs to axon initial segment
+
+iOLM_PC    = 39  // fb inhib via OLMs to SLM (16 of: 8 GABAA, 8 GABAB)
+iBSC_PC    = 55  // ff&fb inhib via BSCs to SR med (16 of: 8 GABAA, 8 GABAB)
+iBSCb_PC   = 71  // ff&fb inhib via BSCs to ori (12 of: 6 GABAA, 6 GABAB)
+iPC_PC     = 83  // CA1 recurrent AMPA excit to proximal SR
+
+// onto AACs
+iEC_AAC    = 0   // excit from EC to AAC (2 of: AMPA)
+iCA3_AAC   = 2   // excit from CA3 to AAC (4 of: AMPA)
+iPC_AAC    = 6   // excit from PC to AAC (2 of: AMPA)
+iBC_AAC    = 8   // inhib from BC to AAC (1 of: GABAA)
+iBSC_AAC   = 9   // inhib from BSC to AAC (2 of: GABAA)
+iOLM_AAC   = 11  // inhib from OLM to AAC (2 of: GABAA)
+iVCCK_AAC  = 13  // inhib from VIP/CCK to AAC (1 of: GABAA)
+iSEP_AAC   = 14  // inhib from septum to AAC(4 of: 2 GABAA, 2 GABAB)
+
+// onto BCs
+iEC_BC     = 0   // excit from EC to BC (2 of: AMPA)
+iCA3_BC    = 2   // excit from CA3 to BC (4 of: AMPA)
+iPC_BC     = 6   // excit from PC to BC (2 of: AMPA)
+iBC_BC     = 8   // inhib from BC to BC (1 of: GABAA)
+iBSC_BC    = 9   // inhib from BSC to BC (2 of: GABAA)
+iOLM_BC    = 11  // inhib from OLM to BC (2 of: GABAA)
+iVCRpvm_BC = 13  // inhib from VIP/CR pvm to BC (1 of: GABAA)
+iVCRnvm_BC = 14  // inhib from VIP/CR nvm to BC (1 of: GABAA)
+iVCCK_BC   = 15  // inhib from VIP/CCK to BC (1 of: GABAA)
+iSEP_BC    = 16  // inhib from septum to BC (4 of: 2 GABAA, 2 GABAB)
+
+// onto BSCs
+iEC_BSC    = 0   // excit from EC to BSC (2 of: AMPA)
+iCA3_BSC   = 2   // excit from CA3 to BSC (4 of: AMPA)
+iPC_BSC    = 6   // excit from PC to BSC (2 of: AMPA)
+iBC_BSC    = 8   // inhib from BC to BSC (1 of: GABAA)
+iBSC_BSC   = 9   // inhib from BSC to BSC (2 of: GABAA)
+iOLM_BSC   = 11  // inhib from OLM to BSC (2 of: GABAA)
+iVCCK_BSC  = 13  // inhib from VIP/CCK to BSC (1 of: GABAA)
+iSEP_BSC   = 14  // inhib from septum to BSC (4 of: 2 GABAA, 2 GABAB)
+
+// onto OLMs
+iPC_OLM    = 0   // excit from PC to OLM (2 of: AMPA)
+iCA3_OLM   = 2   // excit from CA3 to OLM (2 of: AMPA)
+iBSC_OLM   = 4   // inhib from BSC to OLM (2 of: GABAA)
+iOLM_OLM   = 6   // inhib from OLM to OLM (2 of: GABAA)
+iVCRpvm_OLM = 8  // inhib from VIP/CR pvm to OLM (1 of: GABAA)
+iVCRnvm_OLM = 9  // inhib from VIP/CR nvm to OLM (1 of: GABAA)
+iSEP_OLM   = 10  // inhib septum to OLM (2 of: 1 GABAA, 1 GABAB)
+
+// onto VIP/CCKs
+iEC_VCCK   = 0   // excit from ECnvm to VIP/CCK (2 of: AMPA)
+iCA3_VCCK  = 2   // excit from CA3nvm to VIP/CCK (4 of: AMPA)
+iPC_VCCK   = 6   // excit from PC to VIP/CCK (2 of: AMPA)
+iBC_VCCK   = 8   // inhib from BC to VIP/CCK (1 of: GABAA)
+iBSC_VCCK  = 9   // inhib from BSC to VIP/CCK (2 of: GABAA)
+iOLM_VCCK  = 11  // inhib from OLM to VIP/CCK (2 of: GABAA)
+iVCCK_VCCK = 13  // inhib from VIP/CCK to VIP/CCK (1 of: GABAA)
+iVCRpvm_VCCK = 14 // inhib from VIP/CR pvm to VIP/CCK (1 of: GABAA)
+iSEP_VCCK  = 15  // inhib from septum to VIP/CCK (4 of: 2 GABAA, 2 GABAB)
+iMNR_VCCK  = 19  // excit from MnR to VIP/CCK (1 of: AMPA)
+
+// onto VIP/CR pvm
+iEC_VCRpvm  = 0   // excit from EC to VIP/CR pvm (2 of: AMPA)
+iCA3_VCRpvm = 2   // excit from CA3 to VIP/CR pvm (4 of: AMPA)
+iPC_VCRpvm  = 6   // excit from PC to VIP/CR pvm (2 of: AMPA)
+iSEP_VCRpvm = 8   // inhib from septum to VIP/CR pvm (4 of: 2 GABAA, 2 GABAB)
+iMNR_VCRpvm = 12  // excit from MnR to VIP/CR pvm (1 of: AMPA)
+
+// onto VIP/CR nvm
+iEC_VCRnvm     = 0   // excit from ECnvm to VIP/CR nvm (2 of: AMPA)
+iCA3_VCRnvm    = 2   // excit from CA3nvm to VIP/CR nvm (4 of: AMPA)
+iPC_VCRnvm     = 6   // excit from PC to VIP/CR nvm (2 of: AMPA)
+iVCRpvm_VCRnvm = 8   // inhibitory input from VIP/CR pvm to VIP/CR nvm (1 of: GABA)
+iSEP_VCRnvm    = 9   // inhib from septum to VIP/CR nvm (4 of: 2 GABAA, 2 GABAB)
+iMNR_VCRnvm    = 13  // excit from MnR to VIP/CR nvm (1 of: AMPA)
+
+
+//////////////////////////////////////////////////////////////
+// SEPTAL INPUT
+//////////////////////////////////////////////////////////////
+// Septal inhibition
+SEPNUM    = 10000      // number of SEP spikes
+SEPSTART  = STARTDEL   // time of first SEP spike
+SEPINT    = 20.0       // SEP spike ISI (during burst)
+SEPNOISE  = 0.4        // SEP ISI noise
+SEPBINT   = 2*THETA/3  // SEP interburst interval
+SEPBLEN   = THETA/3    // SEP burst length
+SEPWGTA   = 2.0e-4     // SEP weight to AACs
+SEPWGTB   = 8.0e-4/10  // SEP weight to BCs
+SEPWGTBS  = 8.0e-4     // SEP weight to BSCs
+SEPWGTO   = 0.1e-5/10  // SEP weight to OLMs
+SEPWGTV   = 6.0e-4     // SEP weight to VIP/CCKs
+SEPWGTVR  = 2.0e-4     // SEP weight to VIP/CRs
+SEPDEL    = 1.0        // SEP delay
+
+//////////////////////////////////////////////////////////////
+// BACKGROUND INPUT
+//////////////////////////////////////////////////////////////
+// Background excitation
+
+EWGT      = 6.0e-4      // excitatory weights (AMPA)
+ENWGT     = 6.0e-4      // excitatory weights (NMDA)
+EDEL      = 400         // delay (msecs)
+IDEL      = 350         // delay (msecs)
+EC_NOISE  = 20          // number of connections
+CA3_NOISE = 20          // number of connections
+IN_NOISE  = 10          // number of connections
+
+connect_random_low_start_ = 1  // low seed for mcell_ran4_init()
+
+//////////////////////////////////////////////////////////////
+// INTER-CONDITION PLASTICITY
+// Load potentiated Pyr cell list from previous condition
+// (written by compute_plasticity.py after a prior condition run)
+//////////////////////////////////////////////////////////////
+PLASTICITY_BOOST = 1.5  // weight multiplier for potentiated cells
+objref potentiated_vec
+potentiated_vec = new Vector()
+
+if ((learning_cond == 1) || (learning_cond == 2)) {
+  // Determine which condition's output to read
+  // CFC (1) reads from Novelty (0) result, Reintro (2) reads from CFC (1)
+  sprint(pot_dir, "Simulation_Results/%s/%s/Trial_%d/Run_%d", learning, my_string, n_trials, n_runs)
+  
+  sprint(pot_file, "%s/cells_potentiated.txt", pot_dir)
+  pot_fobj = new File()
+  if (pot_fobj.ropen(pot_file)) {
+    potentiated_vec.scanf(pot_fobj)
+    pot_fobj.close()
+    print "Loaded ", potentiated_vec.size(), " potentiated cells from: ", pot_file
+  } else {
+    print "WARNING: cells_potentiated.txt not found at ", pot_file, " -- no weight boost applied"
+  }
+}
+
+// Helper function: returns 1 if gid is in potentiated_vec, else 0
+func is_potentiated() { local k
+  for k=0, potentiated_vec.size()-1 {
+    if (potentiated_vec.x[k] == $1) { return 1 }
+  }
+  return 0
+}
+
+objref nclist
+
+proc mknet_init() {
+
+  print "Make cells..."
+  mkcells()  // create the cells
+  
+  print "Make inputs..."
+  mkinputs()  // create the CA3, EC and septal inputs
+
+  mcell_ran4_init(connect_random_low_start_)
+  nclist = new List()
+}
+
+proc mknet() {
+    
+  print "Connect cells..."
+   
+  print "Connect inputs... to PCs"
+  // EC input to PCs - AMPA
+  connectcellsEC(npcell, iPC, nEC, iEC, EC_PC, iEC_PC, iEC_PC+5, Ecell2Pcell_delay, Ecell2Pcell_weight)
+  // EC input to PCs - NMDA
+  connectcellsEC(npcell, iPC, nEC, iEC, EC_PC, iECN_PC, iECN_PC+5, Ecell2Pcell_delay, Ecell2Pcell_weight)
+  // CA3 input to PCs - AMPA
+  connectcellsCA3(npcell, iPC, nCA3, iCA3, CA3_PC, iCA3_PC, iCA3_PC+5, CA3cell2Pcell_delay, CA3cell2Pcell_weight)
+  // CA3 input to PCs - NMDA
+  connectcellsCA3(npcell, iPC, nCA3, iCA3, CA3_PC, iCA3N_PC, iCA3N_PC+5, CA3cell2Pcell_delay, CA3cell2Pcell_weight)
+  // CA3 input to PCs - basal - AMPA
+  connectcellsCA3(npcell, iPC, nCA3, iCA3, CA3_PC, iCA3_PCB, iCA3_PCB+5, CA3cell2Pcell_delay, CA3cell2Pcell_weight)
+  // CA3 input to PCs - basal - NMDA
+  connectcellsCA3(npcell, iPC, nCA3, iCA3, CA3_PC, iCA3N_PCB, iCA3N_PCB+5, CA3cell2Pcell_delay, CA3cell2Pcell_weight)
+  print "Connect PCs... to PCs"
+  // PC to PC
+  connectcells(npcell, iPC, npcell, iPC, PC_PC, iPC_PC, iPC_PC, Pcell2Pcell_delay, Pcell2Pcell_weight)
+  print "Connect Background activity... to PCs"
+  // Background activity
+  // EC input to PCs - AMPA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, EC_NOISE, iEC_PC, iEC_PC+5, EDEL, EWGT)
+  // EC input to PCs - NMDA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, EC_NOISE, iECN_PC, iECN_PC+5, EDEL, ENWGT)
+  // CA3 input to PCs - AMPA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, CA3_NOISE, iCA3_PC, iCA3_PC+5, EDEL, EWGT )
+  // CA3 input to PCs - NMDA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, CA3_NOISE, iCA3N_PC, iCA3N_PC+5, EDEL, ENWGT )
+  // CA3 input to PCs - basal - AMPA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, CA3_NOISE, iCA3_PCB, iCA3_PCB+5, EDEL, EWGT )
+  // CA3 input to PCs - basal - NMDA
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, CA3_NOISE, iCA3N_PCB, iCA3N_PCB+5, EDEL, ENWGT )
+  // Inhibitory activity to PCs
+  connectcells_noise(npcell, iPC, nNOISE, iNOISE, IN_NOISE, iBC_PC, iBC_PC, IDEL, ENWGT ) 
+}
+
+
+proc mknet_AAC() {
+  print "Connect Inputs... to AACs"
+  // EC to AAC
+  connectcells(naacell, iAAC, nEC, iEC, EC_AAC, iEC_AAC, iEC_AAC+1, Ecell2AAcell_delay, Ecell2AAcell_weight)
+  // CA3 to AAC
+  connectcells(naacell, iAAC, nCA3, iCA3, CA3_AAC, iCA3_AAC, iCA3_AAC+3, CA3cell2AAcell_delay, CA3cell2AAcell_weight)
+  // PC to AAC
+  connectcells(naacell, iAAC, npcell, iPC, PC_AAC, iPC_AAC, iPC_AAC+1, Pcell2AAcell_delay, Pcell2AAcell_weight)
+  // SEP to AAC
+  connectcells(naacell, iAAC, nSEP, iSEP, SEP_AAC, iSEP_AAC, iSEP_AAC+3, SEPDEL, SEPWGTA)
+  print "Connect AACs... to cells"
+  // AAC to PC
+  connectcells(npcell, iPC, naacell, iAAC, AAC_PC, iAAC_PC, iAAC_PC, AAcell2Pcell_delay, AAcell2Pcell_weight)
+}
+
+
+proc mknet_BC() {
+  print "Connect Inputs... to BCs"
+  // EC to BC
+  connectcells(nbcell, iBC, nEC, iEC, EC_BC, iEC_BC, iEC_BC+1, Ecell2Bcell_delay, Ecell2Bcell_weight)
+  // CA3 to BC
+  connectcells(nbcell, iBC, nCA3, iCA3, CA3_BC, iCA3_BC, iCA3_BC+3, CA3cell2Bcell_delay, CA3cell2Bcell_weight)  
+  // PC to BC
+  connectcells(nbcell, iBC, npcell, iPC, PC_BC, iPC_BC, iPC_BC+1, Pcell2Bcell_delay, Pcell2Bcell_weight)  
+  // SEP to BC
+  connectcells(nbcell, iBC, nSEP, iSEP, SEP_BC, iSEP_BC, iSEP_BC+3, SEPDEL, SEPWGTB)
+  print "Connect BCs... to cells"
+  // BC to PC
+  connectcells(npcell, iPC, nbcell, iBC, BC_PC, iBC_PC, iBC_PC, Bcell2Pcell_delay, Bcell2Pcell_weight)
+  // BC to AAC
+  connectcells(naacell, iAAC, nbcell, iBC, BC_AAC, iBC_AAC, iBC_AAC, Bcell2AAcell_delay, Bcell2AAcell_weight) 
+  // BC to BC
+  connectcells(nbcell, iBC, nbcell, iBC, BC_BC, iBC_BC, iBC_BC, Bcell2Bcell_delay, Bcell2Bcell_weight)
+  // BC to BSC
+  connectcells(nbscell, iBSC, nbcell, iBC, BC_BSC, iBC_BSC, iBC_BSC, Bcell2BScell_delay, Bcell2BScell_weight)
+  // BC to VIP/CCK
+  connectcells(nvipcck, iVCCK, nbcell, iBC, BC_VCCK, iBC_VCCK, iBC_VCCK, Bcell2VCCKcell_delay, Bcell2VCCKcell_weight)
+}
+
+proc mknet_BSC() {
+  print "Connect Inputs... to BSCs"
+  // EC to BSC
+  connectcells(nbscell, iBSC, nEC, iEC, EC_BSC, iEC_BSC, iEC_BSC+1, Ecell2BScell_delay, Ecell2BScell_weight)
+  // CA3 to BSC
+  connectcells(nbscell, iBSC, nCA3, iCA3, CA3_BSC, iCA3_BSC, iCA3_BSC+3, CA3cell2BScell_delay, CA3cell2BScell_weight)
+  // PC to BSC
+  connectcells(nbscell, iBSC, npcell, iPC, PC_BSC, iPC_BSC, iPC_BSC+1, Pcell2BScell_delay, Pcell2BScell_weight)  
+  // SEP to BSC
+  connectcells(nbscell, iBSC, nSEP, iSEP, SEP_BSC, iSEP_BSC, iSEP_BSC+3, SEPDEL, SEPWGTBS)
+  print "Connect BSCs... to cells"
+  // BSC to PC - apical
+  connectcells(npcell, iPC, nbscell, iBSC, BSC_PC/4, iBSC_PC, iBSC_PC+7, BScell2Pcell_delay, BScell2Pcell_weight)
+  connectcells(npcell, iPC, nbscell, iBSC, BSC_PC/4, iBSC_PC+8, iBSC_PC+15, BScell2Pcell_delay, BScell2Pcell_GABAB_weight) 
+  // BSC to PC - basal
+  connectcells(npcell, iPC, nbscell, iBSC, BSC_PC/4, iBSCb_PC, iBSCb_PC+5, BScell2Pcell_delay, BScell2Pcell_weight)
+  connectcells(npcell, iPC, nbscell, iBSC, BSC_PC/4, iBSCb_PC+6, iBSCb_PC+11, BScell2Pcell_delay, BScell2Pcell_GABAB_weight) 
+  // BSC to AAC
+  connectcells(naacell, iAAC, nbscell, iBSC, BSC_AAC, iBSC_AAC, iBSC_AAC+1, BScell2AAcell_delay, BScell2AAcell_weight)
+  // BSC to BC
+  connectcells(nbcell, iBC, nbscell, iBSC, BSC_BC, iBSC_BC, iBSC_BC+1, BScell2Bcell_delay, BScell2Bcell_weight)
+  // BSC to BSC
+  connectcells(nbscell, iBSC, nbscell, iBSC, BSC_BSC, iBSC_BSC, iBSC_BSC+1, BScell2BScell_delay, BScell2BScell_weight)  
+  // BSC to OLM
+  connectcells(nolm, iOLM, nbscell, iBSC, BSC_OLM, iBSC_OLM, iBSC_OLM+1, BScell2OLMcell_delay, BScell2OLMcell_weight)
+  // BSC to VIP/CCK
+  connectcells(nvipcck, iVCCK, nbscell, iBSC, BSC_VCCK, iBSC_VCCK, iBSC_VCCK+1, BScell2VCCKcell_delay, BScell2VCCKcell_weight)
+}
+
+proc mknet_OLM() {
+  print "Connect Inputs... to OLMs"
+  // PC to OLM
+  connectcells(nolm, iOLM, npcell, iPC, PC_OLM, iPC_OLM, iPC_OLM+1, Pcell2OLMcell_delay, Pcell2OLMcell_weight)
+  // CA3 to OLM
+  connectcells(nolm, iOLM, nCA3, iCA3, CA3_OLM, iCA3_OLM, iCA3_OLM+1, CA3cell2OLMcell_delay, CA3cell2OLMcell_weight)
+  // SEP to OLM
+  connectcells(nolm, iOLM, nSEP, iSEP, SEP_OLM, iSEP_OLM, iSEP_OLM+1, SEPDEL, SEPWGTO)
+  print "Connect OLMs... to cells"
+  // OLM to PC
+  connectcells(npcell, iPC, nolm, iOLM, OLM_PC/2, iOLM_PC, iOLM_PC+7, OLMcell2Pcell_delay, OLMcell2Pcell_weight)
+  connectcells(npcell, iPC, nolm, iOLM, OLM_PC/2, iOLM_PC+8, iOLM_PC+15, OLMcell2Pcell_delay, OLMcell2Pcell_GABAB_weight) 
+}
+
+proc mknet_VIPCCK() {
+  print "Connect Inputs... to VIPCCKs (from novelty-condition inputs)"
+  // CA3nvm (novelty condition) to VIP/CCK
+  connectcells(nvipcck, iVCCK, nCA3nvm, iCA3nvm, CA3_VCCK, iCA3_VCCK, iCA3_VCCK+3, CA3cell2VCCKcell_delay, CA3cell2VCCKcell_weight)
+  // ECnvm (novelty condition) to VIP/CCK
+  connectcells(nvipcck, iVCCK, nECnvm, iECnvm, EC_VCCK, iEC_VCCK, iEC_VCCK+1, Ecell2VCCKcell_delay, Ecell2VCCKcell_weight)
+  // PC to VIP/CCK
+  connectcells(nvipcck, iVCCK, npcell, iPC, PC_VCCK, iPC_VCCK, iPC_VCCK+1, Pcell2VCCKcell_delay, Pcell2VCCKcell_weight)
+  // SEP to VIP/CCK
+  connectcells(nvipcck, iVCCK, nSEP, iSEP, SEP_VCCK, iSEP_VCCK, iSEP_VCCK+3, SEPDEL, SEPWGTV)
+  // Connections added by AGM
+  if (n_neuron != 9 && n_neuron != 11) {
+    print " MnR to VIP/CCK"
+    connectcells(nvipcck, iVCCK, nMnR, iMnR, MnR_VCCK, iMNR_VCCK, iMNR_VCCK, MnR2VCCKcell_delay, MnR2VCCKcell_weight)
+  } else {
+    print " MnR to VIP/CCK (Silenced)"
+  }
+
+  print "Connect VIPCCKs... to cells"
+  // VIP/CCK to PC
+  connectcells(npcell, iPC, nvipcck, iVCCK, VCCK_PC, iVCCK_PC, iVCCK_PC, VCCKcell2Pcell_delay, VCCKcell2Pcell_weight)
+  // VIP/CCK to BC
+  connectcells(nbcell, iBC, nvipcck, iVCCK, VCCK_BC, iVCCK_BC, iVCCK_BC, VCCKcell2Bcell_delay, VCCKcell2Bcell_weight)
+}
+
+proc mknet_VIPCRpvm() {
+  print "Connect Inputs... to VIPCRs pvm (from place-condition inputs)"
+  // EC (place condition) to VIP/CR pvm
+  connectcells(nvipcrpvm, iVCRpvm, nEC, iEC, EC_VCRpvm, iEC_VCRpvm, iEC_VCRpvm+1, Ecell2VCRpvmcell_delay, Ecell2VCRpvmcell_weight)
+  // CA3 (place condition) to VIP/CR pvm
+  connectcells(nvipcrpvm, iVCRpvm, nCA3, iCA3, CA3_VCRpvm, iCA3_VCRpvm, iCA3_VCRpvm+3, CA3cell2VCRpvmcell_delay, CA3cell2VCRpvmcell_weight)
+  // PC to VIP/CR pvm
+  connectcells(nvipcrpvm, iVCRpvm, npcell, iPC, PC_VCRpvm, iPC_VCRpvm, iPC_VCRpvm+1, Pcell2VCRpvmcell_delay, Pcell2VCRpvmcell_weight)
+  // SEP to VIP/CR pvm
+  connectcells(nvipcrpvm, iVCRpvm, nSEP, iSEP, SEP_VCR, iSEP_VCRpvm, iSEP_VCRpvm+3, SEPDEL, SEPWGTVR)
+  if (n_neuron != 9 && n_neuron != 10) {
+    print " MnR to VIP/CR pvm"
+    connectcells(nvipcrpvm, iVCRpvm, nMnR, iMnR, MnR_VCRpvm, iMNR_VCRpvm, iMNR_VCRpvm, MnR2VCRpvmcell_delay, MnR2VCRpvmcell_weight)
+  } else {
+    print " MnR to VIP/CR pvm (Silenced)"
+  }
+  
+  print "Connect VIPCRs pvm... to cells"
+  if (n_neuron != 3) {
+    print " VIP/CR to BCs"
+    // VIP/CR to BC
+    connectcells(nbcell, iBC, nvipcrpvm, iVCRpvm, VCRpvm_BC, iVCRpvm_BC, iVCRpvm_BC, VCRpvmcell2Bcell_delay, VCRpvmcell2Bcell_weight)
+  } 
+  if (n_neuron != 4) {
+    print " VIP/CR pvm to OLMs"
+    // VIP/CR pvm to OLM
+    connectcells(nolm, iOLM, nvipcrpvm, iVCRpvm, VCRpvm_OLM, iVCRpvm_OLM, iVCRpvm_OLM, VCRpvmcell2OLMcell_delay, VCRpvmcell2OLMcell_weight)
+  }
+  print " VIP/CR pvm to VIP/CCKs"
+  connectcells(nvipcck, iVCCK, nvipcrpvm, iVCRpvm, VCRpvm_VCCK, iVCRpvm_VCCK, iVCRpvm_VCCK, VCRpvmcell2VCCKcell_delay, VCRpvmcell2VCCKcell_weight)
+  print " VIP/CR pvm to VIP/CR nvm"
+  connectcells(nvipcrnvm, iVCRnvm, nvipcrpvm, iVCRpvm, VCRpvm_VCRnvm, iVCRpvm_VCRnvm, iVCRpvm_VCRnvm, VCRpvmcell2VCRnvmcell_delay, VCRpvmcell2VCRnvm_weight)
+}
+
+proc mknet_VIPCRnvm() {
+  print "Connect Inputs... to VIPCRs nvm (from novelty-condition inputs)"
+  // ECnvm (novelty condition) to VIP/CR nvm
+  connectcells(nvipcrnvm, iVCRnvm, nECnvm, iECnvm, EC_VCRnvm, iEC_VCRnvm, iEC_VCRnvm+1, Ecell2VCRnvmcell_delay, Ecell2VCRnvmcell_weight)
+  // CA3nvm (novelty condition) to VIP/CR nvm
+  connectcells(nvipcrnvm, iVCRnvm, nCA3nvm, iCA3nvm, CA3_VCRnvm, iCA3_VCRnvm, iCA3_VCRnvm+3, CA3cell2VCRnvmcell_delay, CA3cell2VCRnvmcell_weight)
+  // PC to VIP/CR nvm
+  connectcells(nvipcrnvm, iVCRnvm, npcell, iPC, PC_VCRnvm, iPC_VCRnvm, iPC_VCRnvm+1, Pcell2VCRnvmcell_delay, Pcell2VCRnvmcell_weight)
+  // SEP to VIP/CR nvm
+  connectcells(nvipcrnvm, iVCRnvm, nSEP, iSEP, SEP_VCR, iSEP_VCRnvm, iSEP_VCRnvm+3, SEPDEL, SEPWGTVR)
+  if (n_neuron != 9 && n_neuron != 11) {
+    print " MnR to VIP/CR nvm"
+    connectcells(nvipcrnvm, iVCRnvm, nMnR, iMnR, MnR_VCRnvm, iMNR_VCRnvm, iMNR_VCRnvm, MnR2VCRnvmcell_delay, MnR2VCRnvmcell_weight)
+  } else {
+    print " MnR to VIP/CR nvm (Silenced)"
+  }
+
+  print "Connect VIPCRs nvm... to cells"
+  if (n_neuron != 3) {
+    print " VIP/CRnvm to BCs"
+    // VIP/CRnvm to BC - use same indexing as VIP/CRpvm
+    connectcells(nbcell, iBC, nvipcrnvm, iVCRnvm, VCRnvm_BC, iVCRnvm_BC, iVCRnvm_BC, VCRnvmcell2Bcell_delay, VCRnvmcell2Bcell_weight)
+  } 
+  if (n_neuron != 4) {
+    print " VIP/CR nvm to OLMs"
+    // VIP/CR nvm to OLM
+    connectcells(nolm, iOLM, nvipcrnvm, iVCRnvm, VCRnvm_OLM, iVCRnvm_OLM, iVCRnvm_OLM, VCRnvmcell2OLMcell_delay, VCRnvmcell2OLMcell_weight)
+  }
+}
+
+objref cells, ranlist, ranlist2, gidvec
+
+// creates the cells and appends them to a List called cells
+// argument is the number of cells to be created
+proc mkcells() {local i,j localobj cell, nc, nil
+  
+  cells = new List()
+  ranlist = new List()
+  ranlist2 = new List()
+  gidvec = new Vector()
+  for i=0, ntot-1 {
+    if (i < iAAC) {
+      cell = new PyramidalCell()                     // PC
+    } else if (i < iBC) {
+      cell = new AACell()                            // AAC
+    } else if (i < iBSC) {
+      cell = new BasketCell()                        // BC
+    } else if (i < iOLM) {
+      cell = new BistratifiedCell()                  // BSC
+    } else if (i < iVCCK) {
+      cell = new OLMCell()                           // OLM
+    } else if (i < iVCRpvm) {
+      cell = new VIPCCKCell()                        // VIP/CCK+
+    } else if (i < iVCRnvm) {
+      cell = new VIPCRCellpvm()                         // VIP disinhibitory CR+ pvm
+    } else if (i < iCA3) {
+      cell = new VIPCRCellnvm()                         // VIP disinhibitory CR+ nvm           
+    } else if (i < iEC) {
+      cell = new StimCellCA3(vspkCA3[i-iCA3])        // CA3 input
+    } else if (i < iCA3nvm) {
+      cell = new StimCellEC(vspkEC[i-iEC])           // EC input
+    } else if (i < iECnvm) {
+      cell = new StimCellCA3(vspkCA3nvm[i-iCA3nvm])  // CA3nvm input
+    } else if (i < iSEP) {
+      cell = new StimCellEC(vspkECnvm[i-iECnvm])     // ECnvm input      
+    } else if (i < iNOISE) {
+      cell = new BurstCell()                         // Septal input
+    } else if (i < iMnR) {
+      cell = new StimCellNOISE(vspkNOISE[i-iNOISE])  // Background Excitation
+    } else {
+      cell = new StimCellMnR(vspkMnR[i-iMnR])         // MnR input
+    }
+    cells.append(cell)
+    ranlist.append(new RandomStream(i+seed1))  // ranlist -- randomness across trials (virtual mice)
+    ranlist2.append(new RandomStream(i+seed2)) // ranlist2 -- randomness across runs (same virtual mouse)
+    gidvec.append(i)
+  }
+}
+
+// Target cells receive "convergence" number of inputs from the pool of source cells
+// connectcells(number of targets, first target cell, 
+//    number of source cells, first source cell, 
+//    convergence, first synapse,
+//    last synapse, connection delay, weight)
+// appends the NetCons to a List called nclist
+proc connectcells() {local i, j, gid, nsyn, r localobj syn, nc, rs
+  for i=0, cells.count-1 {  // loop over possible target cells
+    gid = gidvec.x[i] // id of cell
+    if (gid >= $2 && gid < $1+$2) { // appropriate target cells
+      // initialize the pseudorandom number generator 
+      rs = ranlist.object(i)  // RandomStream for cells.object(i)
+      rs.start()
+       
+      for nsyn=0, $5-1 {
+        // for source cell
+        r = rs.r.discunif($4, $4+$3-1)
+        if (r != gid) {
+          // target synapses
+          j = rs.r.discunif($6, $7)
+          // set up connection from source to target
+          syn = cells.object(i).pre_list.object(j)
+          nc = cells.object(r).connect2target(syn)
+          nc.delay = $8
+          nc.weight = $9
+          nclist.append(nc)
+        }
+      }
+    }
+  }
+}
+
+
+proc connectcells_noise() {local i, j, gid, nsyn, r, rnd localobj syn, nc, rs, rand
+  rand = new Random(seed2)
+  for i=0, cells.count-1 {  // loop over possible target cells
+    gid = gidvec.x[i] // id of cell
+    if (gid >= $2 && gid < $1+$2) { // appropriate target cells
+      // initialize the pseudorandom number generator 
+      rs = ranlist.object(i)  // RandomStream for cells.object(i)
+      rs.start()
+       
+      for nsyn=0, $5-1 {
+        // for source cell
+        r = rs.r.discunif($4, $4+$3-1)
+        while (r == gid) {
+          r = rs.r.discunif($4, $4+$3-1)
+        }
+        // target synapses
+        j = rs.r.discunif($6, $7)
+        // set up connection from source to target
+        syn = cells.object(i).pre_list.object(j)
+        nc = cells.object(r).connect2target(syn)
+        rnd = rand.uniform(0,2)
+        nc.delay = $8*rnd
+        nc.weight = $9
+        nclist.append(nc)
+      }
+    }
+  }
+}
+
+proc connectcellsEC() {local i, j, gid, nsyn, r, r1, r2, r3, r4, cnt, jj, rconv1, r_random, assigned_pcs, new_prob, is_pc localobj syn, nc, rs, rconvobj1, rconvobj2, save_conv_input1, save_conv_input2
+  save_conv_input1 = new File()
+  save_conv_input2 = new File()   
+  sprint(temp_save1,"%s/input_conv1.txt", temp_dir)
+  sprint(temp_save2,"%s/input_conv2.txt", temp_dir)
+  // initialize the pseudorandom number generator
+  rconvobj1 = new Random(seed1)
+  save_conv_input1.wopen(temp_save1)
+  save_conv_input2.wopen(temp_save2)
+  // Secondary variables initialization
+  assigned_pcs = 0
+  if ($1 * probability - nplf < 0) {
+      new_prob = 0
+  } else {
+      new_prob = ($1 * probability - nplf) / ($1 - nplf)
+  }
+
+  // loop over possible target cells
+  for i=0, cells.count-1 {
+    gid = gidvec.x[i] // id of cell
+    if (gid >= $2 && gid < $1+$2) { // appropriate target cells
+      rconv1 = rconvobj1.uniform(0,1)
+      
+      is_pc = 0
+      if (assigned_pcs < nplf) {
+        is_pc = 1
+        r_random = assigned_pcs
+        rs = ranlist.object(i)
+        rs.start()
+      } else {
+        if (rconv1 <= new_prob) {
+          is_pc = 1
+          rs = ranlist.object(i)
+          rs.start()
+          rs.r.discunif(0, nplf-1)
+          r_random = rs.repick()
+        }
+      }
+
+      if (is_pc == 1) {
+        cnt = 8*r_random
+        //print "Convergent input at pyramidals ",gid
+        save_conv_input1.printf("%d, %d\n",gid,r_random)
+        
+        
+        for j = $6, $7 {
+          // set up connection from source to target
+          syn = cells.object(i).pre_list.object(j)
+          nc  = cells.object(cnt+iEC).connect2target(syn)
+          nc.delay = $8
+          // Boost weight for potentiated cells from prior condition
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+        for jj = 0,1 {
+          rs.r.discunif($6, $7)
+          r4 = rs.repick()
+          syn = cells.object(i).pre_list.object(r4)
+          nc = cells.object(cnt+iEC).connect2target(syn)
+          nc.delay = $8
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+      } else {
+        rs = ranlist.object(i)  // RandomStream for cells.object(i)
+        rs.start()
+        rs.r.discunif(0, nplf-1)
+        // return random place field inside the reward zone
+        r = rs.repick()
+        // Define the start of the input indexing
+        cnt = 8*r
+        
+        // save in a txt file input parameters
+        save_conv_input2.printf("%d, %d\n",gid, r)
+        // Loop all over possible dendritic synapses - 6 synapses
+        for j = $6, $7 {
+          // set up connection from source to target
+          syn = cells.object(i).pre_list.object(j)
+          nc = cells.object(cnt+iEC).connect2target(syn)
+          nc.delay  = $8
+          // Non-place cells receive regular EC input; potentiation boosts CA3, not EC
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+        // Loop over two random chosen dendritic synapses
+        for jj = 0,1 {
+          rs.r.discunif($6, $7)
+          r4  = rs.repick()
+          syn = cells.object(i).pre_list.object(r4)
+          nc  = cells.object(cnt+iEC).connect2target(syn)
+          nc.delay  = $8
+          // Non-place cells receive regular EC input; potentiation boosts CA3, not EC
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+      }
+      assigned_pcs += 1
+    }
+  }
+  save_conv_input1.close()
+  save_conv_input2.close()
+}
+
+
+proc connectcellsCA3() {local i, j, gid, nsyn, r, r1, r2, r3, r4, cnt, jj, rconv1, r_random, assigned_pcs, new_prob, is_pc localobj syn, nc, rs, rconvobj1, rconvobj2
+  // initialize the pseudorandom number generator
+  rconvobj1 = new Random(seed1)
+
+  // Secondary variables initialization
+  assigned_pcs = 0
+  if ($1 * probability - nplf < 0) {
+      new_prob = 0
+  } else {
+      new_prob = ($1 * probability - nplf) / ($1 - nplf)
+  }
+
+  // loop over possible target cells
+  for i=0, cells.count-1 {
+    gid = gidvec.x[i] // id of cell
+    if (gid >= $2 && gid < $1+$2) { // appropriate target cells
+      rconv1 = rconvobj1.uniform(0,1)
+      
+      is_pc = 0
+      if (assigned_pcs < nplf) {
+        is_pc = 1
+        r_random = assigned_pcs
+        rs = ranlist.object(i)
+        rs.start()
+      } else {
+        if (rconv1 <= new_prob) {
+          is_pc = 1
+          rs = ranlist.object(i)
+          rs.start()
+          rs.r.discunif(0, nplf-1)
+          r_random = rs.repick()
+        }
+      }
+
+      if (is_pc == 1) {
+        cnt = 8*r_random
+        
+        for j = $6, $7 {
+          // set up connection from source to target
+          syn = cells.object(i).pre_list.object(j)
+          nc  = cells.object(cnt+iCA3).connect2target(syn)
+          nc.delay = $8
+          // Boost weight for potentiated cells from prior condition
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+        for jj = 0,1 {
+          rs.r.discunif($6, $7)
+          r4 = rs.repick()
+          syn = cells.object(i).pre_list.object(r4)
+          nc = cells.object(cnt+iCA3).connect2target(syn)
+          nc.delay = $8
+
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          } else {
+            nc.weight = $9
+          }
+          nclist.append(nc)
+          cnt += 1
+        }
+      } else {
+        rs = ranlist.object(i)  // RandomStream for cells.object(i)
+        rs.start()
+        rs.r.discunif(0, nplf-1)
+        // return random place field inside the reward zone
+        r = rs.repick()
+        // Define the start of the input indexing
+        cnt = 8*r
+
+        // Loop all over possible dendritic synapses - 6 synapses
+        for j = $6, $7 {
+          // set up connection from source to target
+          syn = cells.object(i).pre_list.object(j)
+          nc = cells.object(cnt+iCA3).connect2target(syn)
+          nc.delay  = $8
+          // Non-place cells get 0 CA3 weight by default; potentiation recruits CA3 input
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          }
+          // else don't set weight - nc.weight default is 0
+          nclist.append(nc)
+          cnt += 1
+        }
+        // Loop over two random chosen dendritic synapses
+        for jj = 0,1 {
+          rs.r.discunif($6, $7)
+          r4  = rs.repick()
+          syn = cells.object(i).pre_list.object(r4)
+          nc  = cells.object(cnt+iCA3).connect2target(syn)
+          nc.delay  = $8
+          // Non-place cells get 0 CA3 weight by default; potentiation recruits CA3 input
+          if (is_potentiated(gid)) {
+            nc.weight = $9 * PLASTICITY_BOOST
+          }
+          // else don't set weight - nc.weight default is 0
+          nclist.append(nc)
+          cnt += 1
+        }
+      }
+      assigned_pcs += 1
+    }
+  }
+}
+
+
+
+// sets the Septal background inputs
+proc mkinputs() {local i, r1 localobj stim, rs, robj
+  
+  for i=0, cells.count-1 {
+    gid = gidvec.x[i] // id of cell
+    if (gid >= iSEP && gid < iNOISE) { // appropriate target cell
+      robj = ranlist2.object(i)
+      robj.start()
+      robj.r.discunif(0, SEPNUM)
+
+      r1            = robj.repick()
+      stim          = cells.object(i).stim
+      rs            = ranlist2.object(i)
+      stim.number   = r1
+      stim.start    = SEPSTART
+      stim.interval = SEPINT
+      stim.noise    = SEPNOISE
+      stim.burstint = SEPBINT
+      stim.burstlen = SEPBLEN
+
+      stim.noiseFromRandom(rs.r)
+      rs.r.negexp(1)
+      rs.start()
+    }
+  }
+}
+
+mknet_init()
+
+if (n_neuron == 1) {
+  // No VIP+ population
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  //mknet_VIPCCK()
+  //mknet_VIPCRpmv()
+  //mknet_VIPCRnvm()
+} else if (n_neuron == 2) {
+  // No VIP/CR population
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  mknet_VIPCCK()
+  //mknet_VIPCRpmv()
+  //mknet_VIPCRnvm()
+} else if (n_neuron == 5) {
+  // No VIP/CCK population
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  //mknet_VIPCCK()
+  mknet_VIPCRpvm()
+  mknet_VIPCRnvm()
+} else if (n_neuron == 6) {
+  // No VIP Positive-Velocity-Modulated population
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  mknet_VIPCCK()
+  //mknet_VIPCRpvm()
+  mknet_VIPCRnvm()
+} else if (n_neuron == 7) {
+  // No VIP Negative-Velocity-Modulated population
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  //mknet_VIPCCK()
+  mknet_VIPCRpvm()
+  //mknet_VIPCRnvm()
+} else {
+  // All cells, all connections
+  mknet()  // go ahead and create the net!
+  mknet_AAC()
+  mknet_BC()
+  mknet_BSC()
+  mknet_OLM()
+  mknet_VIPCCK()
+  mknet_VIPCRpvm()
+  mknet_VIPCRnvm()
+}
+
+//////////////////////////////////////////////////
+// Instrumentation, i.e. stimulation and recording
+//////////////////////////////////////////////////
+
+objref tvec, idvec
+proc spikerecord() { local i localobj nc, nil
+  print "Record real cell spikes (0 to ", ncell-1, ")..."
+  tvec = new Vector()
+  idvec = new Vector()
+  for i=0, ncell-1 {
+    nc = cells.object(i).connect2target(nil)
+    nc.record(tvec, idvec, gidvec.x[i])
+  }
+}
+spikerecord()
+
+// Record cell voltage traces
+// 1 representative trace per cell type only (index 0). All spike times still in spikes.dat.
+objref pvsoma    // Representative PC
+objref vAAC      // Representative AAC
+objref vBC       // Representative BC
+objref vBSC      // Representative BSC
+objref vOLM      // Representative OLM
+objref vVCCK     // Representative VIP/CCK
+objref vVCR      // Representative VIP/CR
+objref vVCRnvm   // Representative VIP/CRnvm
+
+proc vrecord() {local i, gid
+  print "Record example voltage traces..."
+  for i=0, ncell-1 {  // loop over real cells
+    gid = gidvec.x[i] // id of cell
+    if (gid == iPC)                    { pvsoma  = new Vector()  pvsoma.record(&cells.object(i).soma.v(0.5)) }
+    if (naacell > 0 && gid == iAAC)   { vAAC    = new Vector()  vAAC.record(&cells.object(i).soma.v(0.5)) }
+    if (nbcell  > 0 && gid == iBC)    { vBC     = new Vector()  vBC.record(&cells.object(i).soma.v(0.5)) }
+    if (nbscell > 0 && gid == iBSC)   { vBSC    = new Vector()  vBSC.record(&cells.object(i).soma.v(0.5)) }
+    if (nolm    > 0 && gid == iOLM)   { vOLM    = new Vector()  vOLM.record(&cells.object(i).soma.v(0.5)) }
+    if (nvipcck > 0 && gid == iVCCK)  { vVCCK   = new Vector()  vVCCK.record(&cells.object(i).soma.v(0.5)) }
+    if (nvipcrpvm  > 0 && gid == iVCRpvm)  { vVCR    = new Vector()  vVCR.record(&cells.object(i).soma.v(0.5)) }
+    if (nvipcrnvm > 0 && gid == iVCRnvm) { vVCRnvm = new Vector()  vVCRnvm.record(&cells.object(i).soma.v(0.5)) }
+  }
+}
+
+vrecord()
+
+
+////////////////////////////
+// Simulation control
+////////////////////////////
+
+strdef fstem, path
+
+sprint(fstem,"%s",temp_dir)
+
+// Time parameters
+tstop = SIMDUR
+dt = 0.1
+steps_per_ms = 10
+//n=tstop*steps_per_ms
+celsius = 34
+// run()
+
+// Standard initialization
+stdinit()
+
+start_wall = startsw() // Start the timer
+current_wall = 0
+
+print "--- Simulation Started ---"
+printf("Total Duration: %.0f ms\n", tstop)
+
+while (t < tstop - 0.0001) {
+    // Determine the next stopping point (every 1000ms)
+    step_goal = t + 50
+    if (step_goal > tstop) { step_goal = tstop }
+    
+    // Advance the simulation to that goal
+    continuerun(step_goal)
+    
+    // Calculate progress and time
+    current_wall = startsw() - start_wall
+    pct = (t / tstop) * 100
+    
+    // ETA calculation
+    if (t > 0) {
+        eta = (current_wall / t) * (tstop - t)
+    } else {
+        eta = 0
+    }
+
+    // Print a clean status line
+    printf("Time: %6.0f/%6.0f ms | Progress: %5.1f%% | Wall Time: %6.0f s | ETA: %5.0fs\n", t, tstop, pct, current_wall, eta)    
+    if (tstop - t < dt/2) { break }
+}
+
+print "--- Simulation Finished ---"
+printf("Total Real-World Time: %.2f seconds\n", startsw() - start_wall)
+
+////////////////////////////
+// Report simulation results
+////////////////////////////
+
+strdef fno, cp_cmd
+
+proc vout() { local i, j, gid, cnt localobj fo, fspk
+  print "Starting vout() - saving data..."
+  for j=0, ncell-1 {  // loop over real cells
+    gid = gidvec.x[j] // id of cell
+    cnt = 0
+    if (gid == iPC)  {
+      sprint(fno,"%s/pvsoma_0.dat", fstem)   fo = new File(fno)   fo.wopen()
+      for i=0, pvsoma.size-1 { fo.printf("%g\n", pvsoma.x[i]) }   fo.close()
+    }
+    if (naacell > 0 && gid == iAAC) {
+      sprint(fno,"%s/aacell_0.dat", fstem)   fo = new File(fno)   fo.wopen()
+      for i=0, vAAC.size-1 { fo.printf("%g\n", vAAC.x[i]) }       fo.close()
+    }
+    if (nbcell > 0 && gid == iBC)  {
+      sprint(fno,"%s/bcell_0.dat", fstem)    fo = new File(fno)   fo.wopen()
+      for i=0, vBC.size-1 { fo.printf("%g\n", vBC.x[i]) }         fo.close()
+    }
+    if (nbscell > 0 && gid == iBSC) {
+      sprint(fno,"%s/bscell_0.dat", fstem)   fo = new File(fno)   fo.wopen()
+      for i=0, vBSC.size-1 { fo.printf("%g\n", vBSC.x[i]) }       fo.close()
+    }
+    if (nolm > 0 && gid == iOLM) {
+      sprint(fno,"%s/olm_0.dat", fstem)       fo = new File(fno)   fo.wopen()
+      for i=0, vOLM.size-1 { fo.printf("%g\n", vOLM.x[i]) }       fo.close()
+    }
+    if (nvipcck > 0 && gid == iVCCK) {
+      sprint(fno,"%s/vipcck_0.dat", fstem)    fo = new File(fno)   fo.wopen()
+      for i=0, vVCCK.size-1 { fo.printf("%g\n", vVCCK.x[i]) }     fo.close()
+    }
+    if (nvipcrpvm > 0 && gid == iVCRpvm) {
+      sprint(fno,"%s/vipcr_0.dat", fstem)     fo = new File(fno)   fo.wopen()
+      for i=0, vVCR.size-1 { fo.printf("%g\n", vVCR.x[i]) }       fo.close()
+    }
+    if (nvipcrnvm > 0 && gid == iVCRnvm) {
+      sprint(fno,"%s/vipcrnvm_0.dat", fstem)  fo = new File(fno)   fo.wopen()
+      for i=0, vVCRnvm.size-1 { fo.printf("%g\n", vVCRnvm.x[i]) } fo.close()
+    }
+  }
+  
+  // Save all spikes
+  fspk = new File()
+  sprint(fno, "%s/spikes.dat", fstem)
+  print "Saving all spikes to ", fno
+  fspk.wopen(fno)
+  for i=0, tvec.size-1 {
+    fspk.printf("%g %d\n", tvec.x[i], idvec.x[i])
+  }
+  fspk.close()
+
+  // Copy path.txt to the result folder for convenience
+  sprint(cp_cmd, "cp make_inputs_linear_track/runs_produced_2D_cond%d_pos/run_%d/path.txt %s/path.txt", learning_cond, n_runs, fstem)
+  system(cp_cmd)
+}
+vout()
+
+print "Job is done without Errors."
